@@ -55,7 +55,7 @@ export abstract class WithdrawalBaseFlow extends BaseFlow {
       amount: 1, // just 1 wei
     };
     if (this.isZKsyncOS) {
-      request.overrides = { gasLimit: 1_000_000, type: 2 }; // to avoid zks_estimateFee call
+      request.overrides = { gasLimit: 30_000_000, type: 2 }; // to avoid zks_estimateFee call
     }
 
     if (this.paymasterAddress != null) {
