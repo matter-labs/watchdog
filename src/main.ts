@@ -12,6 +12,7 @@ import { DepositUserFlow } from "./depositUsers";
 import { recordWalletInfo } from "./flowMetric";
 import { Mutex } from "./lock";
 import { setupLogger } from "./logger";
+import { PrividiumFlow } from "./prividium";
 import { LoggingEthersJsonRpcProvider, LoggingZkSyncProvider } from "./rpcLoggingProvider";
 import { RpcTestFlow } from "./rpcTest";
 import { SettlementFlow } from "./settlement";
@@ -103,6 +104,16 @@ const main = async () => {
       const l1Provider = new Provider(unwrap(process.env.CHAIN_L1_RPC_URL));
       const settlementIntervalMs = +(process.env.FLOW_SETTLEMENT_INTERVAL ?? SEC);
       new SettlementFlow(l2Provider, l1Provider, settlementIntervalMs, SETTLEMENT_DEADLINE).run();
+      enabledFlows++;
+    }
+
+    // Prividium flow
+    if (process.env.FLOW_PRIVIDIUM_ENABLE === "1") {
+      const prividiumUserPanelUrl = unwrap(process.env.PRIVIDIUM_USER_PANEL_URL);
+      const prividiumApiUrl = unwrap(process.env.PRIVIDIUM_API_URL);
+      const prividiumDomain = new URL(prividiumUserPanelUrl).hostname;
+      const prividiumIntervalMs = +(process.env.FLOW_PRIVIDIUM_INTERVAL ?? SEC);
+      new PrividiumFlow(wallet.address, prividiumDomain, prividiumApiUrl, prividiumIntervalMs).run();
       enabledFlows++;
     }
   } else {

@@ -154,6 +154,16 @@ Options:
 - `SETTLEMENT_DEADLINE` -- acceptable settlement delay in ms (defaults to 1.5 hours)
 - `FLOW_SETTLEMENT_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
 
+### Prividium
+
+Requests SIWE (Sign-In With Ethereum) messages from the Prividium permissions API. This flow is only available for ZKOS mode chains.
+
+Options:
+- `FLOW_PRIVIDIUM_ENABLE` -- set to `1` to enable
+- `PRIVIDIUM_USER_PANEL_URL` -- URL of the Prividium user panel (e.g., `https://user-panel.testnet-prividium.zksync.dev/`)
+- `PRIVIDIUM_API_URL` -- URL of the Prividium permissions API endpoint (e.g., `https://permissions-api.testnet-prividium.zksync.dev/api/siwe-messages/`)
+- `FLOW_PRIVIDIUM_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
+
 ---
 
 ## License
