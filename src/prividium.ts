@@ -60,7 +60,12 @@ export class PrividiumFlow extends BaseFlow {
         this.metricRecorder.recordFlowSuccess();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
-        this.logger.error(`SIWE message request error: ${error?.message}`, error?.stack);
+        this.logger.error(`SIWE message request failed: ${error?.message || error?.toString() || "Unknown error"}`, {
+          apiUrl: this.apiUrl,
+          address: this.address,
+          domain: this.domain,
+          error: error?.stack || error,
+        });
         this.metricRecorder.recordFlowFailure();
       }
 
