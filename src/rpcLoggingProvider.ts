@@ -3,8 +3,28 @@ import winston from "winston";
 import { Provider as ZkSyncProvider } from "zksync-ethers";
 import { IBridgehub__factory } from "zksync-ethers/build/typechain";
 
-import type { Provider as EthersProvider, TransactionReceipt } from "ethers";
+import type { Networkish, Provider as EthersProvider, TransactionReceipt } from "ethers";
 import type { Fee, TransactionRequest } from "zksync-ethers/build/types";
+
+/** Optional auth token getter for Prividium (Authorization: Bearer). */
+export type AuthTokenGetter = () => string | null;
+
+/**
+ * Ethers JsonRpcProvider that can be given an auth token getter for Prividium.
+ */
+class AuthableEthersJsonRpcProvider extends EthersJsonRpcProvider {
+  declare readonly rpcUrl?: string;
+  getAuthToken?: AuthTokenGetter;
+
+  constructor(url?: string, network?: Networkish) {
+    super(url, network);
+    this.rpcUrl = url;
+  }
+
+  setAuthTokenGetter(getter: AuthTokenGetter): void {
+    this.getAuthToken = getter;
+  }
+}
 
 /**
  * Custom Provider wrapper that logs all JSON-RPC calls
@@ -12,10 +32,16 @@ import type { Fee, TransactionRequest } from "zksync-ethers/build/types";
 class ZkSyncOsProvider extends ZkSyncProvider {
   private l1Provider: EthersProvider | null = null;
   private isZKsyncOS = false;
+  protected readonly rpcUrl: string;
+  getAuthToken?: AuthTokenGetter;
 
   constructor(url: string) {
-    // Pass the URL to the parent class constructor
     super(url);
+    this.rpcUrl = url;
+  }
+
+  setAuthTokenGetter(getter: AuthTokenGetter): void {
+    this.getAuthToken = getter;
   }
 
   setIsZKsyncOS(isZKsyncOS: boolean) {
@@ -54,6 +80,11 @@ class ZkSyncOsProvider extends ZkSyncProvider {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getRpcUrl(provider: any): string | undefined {
+  return provider.rpcUrl ?? provider._getConnection?.()?.url;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ctor<T = object> = new (...args: any[]) => T;
 
 const LoggingProviderMixing = <TBase extends Ctor<EthersJsonRpcProvider>>(Base: TBase) => {
@@ -62,6 +93,7 @@ const LoggingProviderMixing = <TBase extends Ctor<EthersJsonRpcProvider>>(Base: 
 
     override async send(method: string, params: unknown[] | Record<string, unknown>): Promise<unknown> {
       const id = this.requestId++;
+      const self = this as typeof this & { getAuthToken?: AuthTokenGetter };
 
       winston.debug(`[JSON-RPC Request] ID: ${id} Method: ${method}`, {
         rpcRequest: {
@@ -73,10 +105,18 @@ const LoggingProviderMixing = <TBase extends Ctor<EthersJsonRpcProvider>>(Base: 
 
       const startTime = Date.now();
       try {
-        // Call the parent class's send method directly
-        const result = await super.send(method, params);
-        const duration = Date.now() - startTime;
+        let result: unknown;
+        const token = self.getAuthToken?.();
 
+        const url = getRpcUrl(self);
+
+        if (token && url) {
+          result = await sendAuthorizedRpcRequest(url, token, id, method, params);
+        } else {
+          result = await super.send(method, params);
+        }
+
+        const duration = Date.now() - startTime;
         winston.debug(`[JSON-RPC Response] ID: ${id} Method: ${method} Duration: ${duration}ms`, {
           rpcResponse: {
             id,
@@ -151,5 +191,39 @@ const LoggingProviderMixing = <TBase extends Ctor<EthersJsonRpcProvider>>(Base: 
   };
 };
 
+async function sendAuthorizedRpcRequest(
+  url: string,
+  token: string,
+  id: number,
+  method: string,
+  params: unknown[] | Record<string, unknown>
+) {
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method,
+    params: Array.isArray(params) ? params : params === undefined ? [] : [params],
+  });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body,
+  });
+  const data = (await res.json()) as { result?: unknown; error?: { code?: number; message?: string } };
+  if (!res.ok || data.error) {
+    const err = new Error(data.error?.message ?? `RPC ${res.status}`) as Error & {
+      code?: number;
+      data?: unknown;
+    };
+    err.code = data.error?.code;
+    err.data = data.error;
+    throw err;
+  }
+  return data.result;
+}
+
 export const LoggingZkSyncProvider = LoggingProviderMixing(ZkSyncOsProvider);
-export const LoggingEthersJsonRpcProvider = LoggingProviderMixing(EthersJsonRpcProvider);
+export const LoggingEthersJsonRpcProvider = LoggingProviderMixing(AuthableEthersJsonRpcProvider);

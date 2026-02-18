@@ -41,6 +41,7 @@ FLOW_DEPOSIT_ENABLE=1
 FLOW_DEPOSIT_USER_ENABLE=1
 FLOW_WITHDRAWAL_ENABLE=1
 FLOW_WITHDRAWAL_FINALIZE_ENABLE=1
+FLOW_PRIVIDIUM_ENABLE=1  # Only for ZKOS mode
 ```
 
 Install dependencies and start
@@ -67,7 +68,7 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `METRICS_PORT`: Prometheus metrics port (default: `8080`)
 - `CHAIN_L1_RPC_URL`: L1 JSON-RPC endpoint
 - `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 15 seconds)
-- `ZKOS_MODE`: Set to `1` to work in ZKOS mode (default: `0`). Only transfer flow will be available.
+- `ZKOS_MODE`: Set to `1` to work in ZKOS mode (default: `0`). Enables ZKsync OS–specific flows (transfer, deposit, withdrawal, settlement, RPC test). Prividium flow is only available in this mode.
 
 ### Flow-specific options
 See below for detailed flow configuration.
@@ -156,12 +157,14 @@ Options:
 
 ### Prividium
 
-Requests SIWE (Sign-In With Ethereum) messages from the Prividium permissions API. This flow is only available for ZKOS mode chains.
+Requests SIWE (Sign-In With Ethereum) messages from the Prividium permissions API and uses the obtained auth token for L2 RPC calls. This flow is only available for ZKOS mode chains. When enabled, all L2 RPC requests include the `Authorization: Bearer` header.
+
+If you want a full test using prividium you have to change CHAIN_RPC_URL to Prividium API
 
 Options:
 - `FLOW_PRIVIDIUM_ENABLE` -- set to `1` to enable
-- `PRIVIDIUM_USER_PANEL_URL` -- URL of the Prividium user panel (e.g., `https://user-panel.testnet-prividium.zksync.dev/`)
-- `PRIVIDIUM_API_URL` -- URL of the Prividium permissions API endpoint (e.g., `https://permissions-api.testnet-prividium.zksync.dev/api/siwe-messages/`)
+- `FLOW_PRIVIDIUM_DOMAIN` -- Domain for the SIWE message (e.g., `user-panel.testnet-prividium.zksync.dev`)
+- `FLOW_PRIVIDIUM_API_URL` -- Base URL of the Prividium permissions API (e.g., `https://permissions-api.testnet-prividium.zksync.dev`). The flow appends `/api/siwe-messages` and `/api/auth/login/crypto-native` automatically.
 - `FLOW_PRIVIDIUM_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
 
 ---
