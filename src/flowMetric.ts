@@ -66,7 +66,7 @@ class FlowMetricStore {
     });
     this.metric_step_gas_price = new Gauge({
       name: "watchdog_step_gas_price",
-      help: "Watchdog step gas price (either limit or actualy used)",
+      help: "Watchdog step gas price (either limit or actually used)",
       labelNames: ["flow", "step"],
     });
     this.metric_step_gas_cost = new Gauge({

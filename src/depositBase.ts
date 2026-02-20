@@ -1,30 +1,23 @@
 import "dotenv/config";
-import { id } from "ethers";
-import { utils } from "zksync-ethers";
+import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
+import { id, Contract } from "ethers";
 
 import { BaseFlow } from "./baseFlow";
 import { StatusNoSkip } from "./flowMetric";
 import { MIN, SEC, unwrap } from "./utils";
 
-import type { BigNumberish, BytesLike, Overrides, TransactionReceipt, Provider as EthersProvider } from "ethers";
-import type { types, Wallet } from "zksync-ethers";
-import type { IL1SharedBridge } from "zksync-ethers/build/typechain";
+import type { EthersClient } from "@matterlabs/zksync-js/ethers";
+import type { TransactionReceipt, Provider, Wallet, Signer } from "ethers";
 
-type DepositTxRequest = {
-  token: types.Address;
-  amount: BigNumberish;
-  to?: types.Address;
-  operatorTip?: BigNumberish;
-  bridgeAddress?: types.Address;
-  approveERC20?: boolean;
-  approveBaseERC20?: boolean;
-  l2GasLimit?: BigNumberish;
-  gasPerPubdataByte?: BigNumberish;
-  refundRecipient?: types.Address;
-  overrides?: Overrides;
-  approveOverrides?: Overrides;
-  approveBaseOverrides?: Overrides;
-  customBridgeData?: BytesLike;
+const erc20ABI = [
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address account) view returns (uint256)",
+];
+
+export const getErc20Contract = (address: string, provider: Provider, signer: Signer) => {
+  const l1Signer = signer.connect(provider);
+  return new Contract(address, erc20ABI, l1Signer);
 };
 
 export type ExecutionResultUnknown = { status: null; timestampL1: 0 };
@@ -58,28 +51,13 @@ export const DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI =
 export abstract class DepositBaseFlow extends BaseFlow {
   constructor(
     protected wallet: Wallet,
-    protected sharedBridge: IL1SharedBridge,
+    protected client: EthersClient,
+    protected sharedBridge: Contract,
     protected zkChainAddress: string,
     protected chainId: bigint,
-    protected baseToken: string,
-    protected l2EthersProvider: EthersProvider,
-    protected isZKsyncOS: boolean,
     flowName: string
   ) {
     super(flowName);
-  }
-
-  protected getDepositRequest(): DepositTxRequest {
-    const request: DepositTxRequest = {
-      to: this.wallet.address,
-      token: this.baseToken,
-      amount: 1, // just 1 wei
-      refundRecipient: this.wallet.address,
-    };
-    if (this.isZKsyncOS) {
-      request.l2GasLimit = 1_000_000; // to avoid zks_estimateL1ToL1Gas call
-    }
-    return request;
   }
 
   protected async getLastExecution(wallet: string | undefined): Promise<ExecutionResult> {
@@ -91,10 +69,10 @@ export abstract class DepositBaseFlow extends BaseFlow {
       topicFilter[0] as string,
       id("BridgehubDepositBaseTokenInitiated(uint256,address,bytes32,uint256)"),
     ];
-    const topBlock = await this.wallet._providerL1().getBlockNumber();
+    const topBlock = await this.client.l1.getBlockNumber();
     const blockchainTime = await this.getCurrentChainTimestamp();
     // actually filter structure got modified itself so we could use it, but lets not rely on such unexpected behaviour
-    const events = await this.wallet._providerL1().getLogs({
+    const events = await this.client.l1.getLogs({
       address: await this.sharedBridge.getAddress(),
       topics: topicFilter,
       fromBlock: Math.max(topBlock - +(process.env.MAX_LOGS_BLOCKS ?? 50 * 1000), 0),
@@ -112,17 +90,22 @@ export abstract class DepositBaseFlow extends BaseFlow {
 
     const timestampL1 = (await event.getBlock()).timestamp;
     const l1Receipt = await event.getTransactionReceipt();
-    const l2TxHash = utils.getL2HashFromPriorityOp(l1Receipt, this.zkChainAddress);
+    const l2TxHash = getL2TransactionHashFromLogs(l1Receipt.logs.filter((log) => log.address === this.zkChainAddress));
+
     const secSinceL1Deposit = blockchainTime - timestampL1;
     this.logger.info(
       `Found deposit ${event.transactionHash} at ${new Date(timestampL1 * 1000).toUTCString()}, ${secSinceL1Deposit} seconds ago, expecting L2 TX hash ${l2TxHash}`
     );
     let l2Receipt: TransactionReceipt | null = null;
-    try {
-      l2Receipt = await this.l2EthersProvider.waitForTransaction(l2TxHash, 1, PRIORITY_OP_TIMEOUT);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (e: any) {
-      this.logger.error(`${event.transactionHash} error (${e?.message}) fetching l2 transaction: ${l2TxHash} `);
+    if (!l2TxHash) {
+      this.logger.error(`${event.transactionHash} could not extract L2 tx hash from deposit logs`);
+    } else {
+      try {
+        l2Receipt = await this.client.l2.waitForTransaction(l2TxHash, 1, PRIORITY_OP_TIMEOUT);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (e: any) {
+        this.logger.error(`${event.transactionHash} error (${e?.message}) fetching l2 transaction: ${l2TxHash} `);
+      }
     }
 
     const l1Res = {
@@ -157,11 +140,6 @@ export abstract class DepositBaseFlow extends BaseFlow {
   }
 
   protected async getCurrentChainTimestamp(): Promise<number> {
-    return unwrap(
-      await this.wallet
-        ._providerL1()
-        .getBlock("latest")
-        .then((block) => block?.timestamp)
-    );
+    return unwrap(await this.client.l1.getBlock("latest").then((block) => block?.timestamp));
   }
 }

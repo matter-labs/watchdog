@@ -1,58 +1,60 @@
 import "dotenv/config";
 
+import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
+
 import { L2_EXECUTION_TIMEOUT } from "./configs";
 import { StatusNoSkip } from "./flowMetric";
 import { SEC, unwrap, timeoutPromise } from "./utils";
 import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
-import type { BigNumberish, Provider as EthersProvider } from "ethers";
-import type { Wallet } from "zksync-ethers";
+import type { WithdrawParams } from "@matterlabs/zksync-js/core";
+import type { EthersSdk } from "@matterlabs/zksync-js/ethers/sdk";
+import type { Wallet } from "ethers";
 
 const FLOW_NAME = "withdrawal";
 
 export class WithdrawalFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: Wallet,
-    paymasterAddress: string | undefined,
-    isZKsyncOS: boolean,
     private l2WalletLock: Mutex,
     private intervalMs: number,
-    private l2EthersProvider: EthersProvider
+    private sdk: EthersSdk
   ) {
-    super(wallet, paymasterAddress, isZKsyncOS, FLOW_NAME);
+    super(wallet, FLOW_NAME);
   }
 
   protected async executeWatchdogWithdrawal(): Promise<StatusNoSkip> {
     try {
       this.metricRecorder.recordFlowStart();
-
-      const populatedWithOverrides = await this.metricRecorder.stepExecution({
+      const withdrawalParams = await this.metricRecorder.stepExecution({
         stepName: STEPS.estimation,
         stepTimeoutMs: 10 * SEC,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const tx = await this.wallet._providerL2().getWithdrawTx(this.getWithdrawalRequest());
-          const nonce = await this.wallet.getNonce("latest");
-          const populated = await this.wallet.populateTransaction({
-            ...tx,
-            nonce,
-          });
+          const params = {
+            to: this.wallet.address,
+            token: ETH_ADDRESS,
+            amount: 1n, // just 1 wei
+            l2TxOverrides: { nonce: "latest" },
+          } as WithdrawParams;
+          const withdrawalQuote = await this.sdk.withdrawals.quote(params);
 
-          recordStepGas(unwrap(populated.gasLimit));
-          recordStepGasPrice(unwrap(populated.maxFeePerGas));
-          recordStepGasCost(BigInt(unwrap(populated.gasLimit)) * BigInt(unwrap(populated.maxFeePerGas)));
+          recordStepGas(unwrap(withdrawalQuote.fees.l2!.gasLimit));
+          recordStepGasPrice(unwrap(withdrawalQuote.fees.l2!.maxFeePerGas));
+          recordStepGasCost(
+            BigInt(unwrap(withdrawalQuote.fees.l2!.gasLimit)) * BigInt(unwrap(withdrawalQuote.fees.l2!.maxFeePerGas))
+          );
 
-          return populated;
+          return params;
         },
       });
-
       // send L2 withdrawal transaction
       const withdrawalHandle = await this.metricRecorder.stepExecution({
         stepName: STEPS.send,
         stepTimeoutMs: 10 * SEC,
-        fn: () => this.wallet.sendTransaction(populatedWithOverrides),
+        fn: () => this.sdk.withdrawals.create(withdrawalParams),
       });
-      this.logger.info(`Tx (L2: ${withdrawalHandle.hash}) sent on L2`);
+      this.logger.info(`Tx (L2: ${withdrawalHandle.l2TxHash}) sent on L2`);
 
       // wait for transaction to be included in L2 block
       await this.metricRecorder.stepExecution({
@@ -63,18 +65,18 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
           recordStepGasPrice,
           recordStepGasCost,
         }: {
-          recordStepGas: (gas: BigNumberish) => void;
-          recordStepGasPrice: (price: BigNumberish) => void;
-          recordStepGasCost: (cost: BigNumberish) => void;
+          recordStepGas: (gas: bigint) => void;
+          recordStepGasPrice: (price: bigint) => void;
+          recordStepGasCost: (cost: bigint) => void;
         }) => {
-          const receipt = unwrap(await this.l2EthersProvider.waitForTransaction(withdrawalHandle.hash));
+          const receipt = unwrap(await this.sdk.withdrawals.wait(withdrawalHandle, { for: "l2" }));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));
         },
       });
 
-      this.logger.info(`Tx (L2: ${withdrawalHandle.hash}) included in L2 block`);
+      this.logger.info(`Tx (L2: ${withdrawalHandle.l2TxHash}) included in L2 block`);
       this.metricRecorder.recordFlowSuccess();
       return StatusNoSkip.OK;
     } catch (e) {
@@ -88,7 +90,11 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     const lastExecution = await this.getLastExecution("latest", this.wallet.address);
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
-    if (lastExecution != null) this.metricRecorder.recordPreviousExecutionStatus(StatusNoSkip.OK);
+    if (lastExecution != null) {
+      this.metricRecorder.recordPreviousExecutionStatus(
+        lastExecution.l2Receipt.status === 1 ? StatusNoSkip.OK : StatusNoSkip.FAIL
+      );
+    }
     if (timeSinceLastWithdrawalSec < this.intervalMs / SEC) {
       const waitTime = this.intervalMs - timeSinceLastWithdrawalSec * SEC;
       this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting withdrawal flow`);

@@ -3,13 +3,13 @@ import "dotenv/config";
 import { BaseFlow } from "./baseFlow";
 import { SEC, timeoutPromise } from "./utils";
 
-import type { Provider } from "zksync-ethers";
+import type { JsonRpcProvider } from "ethers";
 
 const FLOW_NAME = "rpc_test";
 
 export class RpcTestFlow extends BaseFlow {
   constructor(
-    private provider: Provider,
+    private provider: JsonRpcProvider,
     private intervalMs: number
   ) {
     super(FLOW_NAME);

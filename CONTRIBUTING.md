@@ -5,7 +5,7 @@ sovereignty! We welcome contributions from anyone on the internet, and are grate
 
 ## Ways to contribute
 
-There are many ways to contribute to the ZK Stack:
+There are many ways to contribute to the Watchdog:
 
 1. Open issues: if you find a bug, have something you believe needs to be fixed, or have an idea for a feature, please
    open an issue.
@@ -32,7 +32,7 @@ If you contribute to this project, your contributions will be made to the projec
 We aim to make it as easy as possible to contribute to the mission. This is still WIP, and we're happy for contributions
 and suggestions here too. Some resources to help:
 
-1. [Tooling docs](https://docs.zksync.io/zksync-era/tooling/local-setup)
+1. [ZKsync OS Server repo](https://github.com/matter-labs/zksync-os-server)
 2. Company links can be found in the [repo's readme](README.md)
 
 ## Code of Conduct

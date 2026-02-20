@@ -1,8 +1,8 @@
-# ZK Stack Watchdog
+# ZKsync OS Watchdog
 
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue)](https://github.com/matter-labs/zksync-wallet-vue/blob/master/LICENSE-MIT)
 
-Service for submitting periodic on-chain transactions and exporting related metrics via a Prometheus exporter. Designed to monitor and ensure the health of ZK Stack-based chains, including during periods of low activity.
+Service for submitting periodic on-chain transactions and exporting related metrics via a Prometheus exporter. Designed to monitor and ensure the health of ZKsync OS based chains, including during periods of low activity.
 
 ---
 
@@ -38,9 +38,9 @@ CHAIN_L1_RPC_URL=http://127.0.0.1:8545
 # Wanted flows
 FLOW_TRANSFER_ENABLE=1
 FLOW_DEPOSIT_ENABLE=1
-FLOW_DEPOSIT_USER_ENABLE=1
 FLOW_WITHDRAWAL_ENABLE=1
 FLOW_WITHDRAWAL_FINALIZE_ENABLE=1
+FLOW_WITHDRAWAL_INTERVAL=60000
 FLOW_PRIVIDIUM_ENABLE=1  # Only for ZKOS mode
 ```
 
@@ -52,8 +52,8 @@ yarn run start
 
 Or, to use Docker:
 ```bash
-docker build -t zk-stack-watchdog .
-docker run --env-file .env zk-stack-watchdog
+docker build -t zksync-os-watchdog .
+docker run --env-file .env zksync-os-watchdog
 ```
 
 ## Configuration
@@ -67,8 +67,9 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `PAYMASTER_ADDRESS`: (optional) Use paymaster for L2 transactions
 - `METRICS_PORT`: Prometheus metrics port (default: `8080`)
 - `CHAIN_L1_RPC_URL`: L1 JSON-RPC endpoint
+- `L2_POLLING_INTERVAL`: L2 provider polling interval in ms (default: `100`)
+- `L1_POLLING_INTERVAL`: L1 provider polling interval in ms (default: ethers.js default, currenly 4 sec)
 - `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 15 seconds)
-- `ZKOS_MODE`: Set to `1` to work in ZKOS mode (default: `0`). Enables ZKsync OS–specific flows (transfer, deposit, withdrawal, settlement, RPC test). Prividium flow is only available in this mode.
 
 ### Flow-specific options
 See below for detailed flow configuration.
@@ -111,7 +112,6 @@ Options:
 Observes onchain deposit transactions and performs deposit if none detected or if last failed.
 
 Options:
-- `FLOW_DEPOSIT_USER_ENABLE` -- set to `1` to enable
 - `FLOW_DEPOSIT_USER_INTERVAL` -- interval in ms (frequency of quaring latest deposit)
 - `FLOW_DEPOSIT_USER_TX_TRIGGER_DELAY` -- max age of user transaction to consider. If exceeded watchdog will trigger deposit transaction from watchdog wallet
 - `FLOW_DEPOSIT_L2_TIMEOUT`, `MAX_LOGS_BLOCKS`, `FLOW_DEPOSIT_RETRY_INTERVAL`, `FLOW_DEPOSIT_RETRY_LIMIT`, `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI` shared with deposit flow
@@ -133,7 +133,6 @@ Simulates (via `eth_gasEstimate`) finalization of latest withdrawal for L1 valid
 Options:
 - `FLOW_WITHDRAWAL_FINALIZE_ENABLE` -- set to `1` to enable
 - `FLOW_WITHDRAWAL_FINALIZE_INTERVAL` -- interval in ms (defaults to 15 minutes)
-- `PRE_V26_BRIDGES` -- set to `1` to use pre-v26 bridge interface (`withdrawalFinalize` requiring `legacySharedBridge` called through `BridgeHub` instead of `L1Nullifier` `depositFinalized` called directly). Setting to `0` is unsupported right now.
 
 ### RPC Test
 
