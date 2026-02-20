@@ -6,7 +6,6 @@ import { BaseFlow } from "./baseFlow";
 import { SEC, timeoutPromise } from "./utils";
 
 import type { Provider } from "ethers";
-import type { Provider as ZkSyncProvider } from "zksync-ethers";
 
 const FLOW_NAME = "settlement";
 
@@ -14,7 +13,7 @@ export class SettlementFlow extends BaseFlow {
   private metricSettlementAge: Gauge;
 
   constructor(
-    private l2Provider: ZkSyncProvider,
+    private l2Provider: Provider,
     private l1Provider: Provider,
     private intervalMs: number,
     private settlementDeadline: number

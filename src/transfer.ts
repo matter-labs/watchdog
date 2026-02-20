@@ -1,14 +1,11 @@
 import "dotenv/config";
-import { utils } from "zksync-ethers";
-
 import { BaseFlow } from "./baseFlow";
 import { L2_EXECUTION_TIMEOUT } from "./configs";
 import { recordL2BaseTokenBalance, StatusNoSkip } from "./flowMetric";
 import { SEC, timeoutPromise, unwrap } from "./utils";
 
 import type { Mutex } from "./lock";
-import type { Provider as EthersProvider, Wallet as EthersWallet } from "ethers";
-import type { types, Provider, Wallet as ZkSyncWallet } from "zksync-ethers";
+import type { Provider, Wallet, TransactionRequest } from "ethers";
 
 const FLOW_NAME = "transfer";
 const TRANSFER_RETRY_LIMIT = +(process.env.FLOW_TRANSFER_RETRY_LIMIT ?? 5);
@@ -16,36 +13,19 @@ const TRANSFER_RETRY_INTERVAL = +(process.env.FLOW_TRANSFER_RETRY_INTERVAL ?? 5 
 
 export class SimpleTxFlow extends BaseFlow {
   constructor(
-    private provider: Provider,
-    private wallet: ZkSyncWallet | EthersWallet,
+    private wallet: Wallet,
     private l2WalletLock: Mutex,
-    private paymasterAddress: string | undefined,
-    private intervalMs: number,
-    private l2EthersProvider: EthersProvider | null = null
+    private provider: Provider,
+    private intervalMs: number
   ) {
     super(FLOW_NAME);
   }
 
-  protected getTxRequest(): types.TransactionRequest {
-    if (this.paymasterAddress != null) {
-      const paymasterParams = utils.getPaymasterParams(this.paymasterAddress, {
-        type: "General",
-        innerInput: new Uint8Array(),
-      });
-      return {
-        to: this.wallet.address,
-        value: 0, // in paymaster scenario we may not have any funds
-        customData: {
-          gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
-          paymasterParams,
-        },
-      };
-    } else {
-      return {
-        to: this.wallet.address,
-        value: 1, // just 1 wei
-      };
-    }
+  protected getTxRequest(): TransactionRequest {
+    return {
+      to: this.wallet.address,
+      value: 1, // just 1 wei
+    };
   }
 
   protected async step(): Promise<StatusNoSkip> {
@@ -83,18 +63,13 @@ export class SimpleTxFlow extends BaseFlow {
         stepName: "execution",
         stepTimeoutMs: L2_EXECUTION_TIMEOUT,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          let receipt;
-          if (this.l2EthersProvider != null) {
-            receipt = unwrap(await this.l2EthersProvider.waitForTransaction(txResponse.hash, 1));
-          } else {
-            receipt = unwrap(await txResponse.wait(1));
-          }
+          const receipt = unwrap(await this.provider.waitForTransaction(txResponse.hash, 1));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));
           return receipt;
         },
-      }); // included in a block
+      });
 
       this.metricRecorder.recordFlowSuccess();
       return StatusNoSkip.OK;

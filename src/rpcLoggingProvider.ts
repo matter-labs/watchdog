@@ -1,10 +1,7 @@
-import { JsonRpcProvider as EthersJsonRpcProvider } from "ethers";
+import { JsonRpcProvider } from "ethers";
 import winston from "winston";
-import { Provider as ZkSyncProvider } from "zksync-ethers";
-import { IBridgehub__factory } from "zksync-ethers/build/typechain";
 
-import type { Networkish, Provider as EthersProvider, TransactionReceipt } from "ethers";
-import type { Fee, TransactionRequest } from "zksync-ethers/build/types";
+import type { JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
 
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
 export type AuthTokenGetter = () => string | null;
@@ -12,71 +9,18 @@ export type AuthTokenGetter = () => string | null;
 /**
  * Ethers JsonRpcProvider that can be given an auth token getter for Prividium.
  */
-class AuthableEthersJsonRpcProvider extends EthersJsonRpcProvider {
+class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   declare readonly rpcUrl?: string;
   getAuthToken?: AuthTokenGetter;
 
-  constructor(url?: string, network?: Networkish) {
-    super(url, network);
+  constructor(url?: string, network?: Networkish, options?: JsonRpcApiProviderOptions) {
+    super(url, network, options);
     this.rpcUrl = url;
   }
 
   setAuthTokenGetter(getter: AuthTokenGetter): void {
     this.getAuthToken = getter;
   }
-}
-
-/**
- * Custom Provider wrapper that logs all JSON-RPC calls
- */
-class ZkSyncOsProvider extends ZkSyncProvider {
-  private l1Provider: EthersProvider | null = null;
-  private isZKsyncOS = false;
-  protected readonly rpcUrl: string;
-  getAuthToken?: AuthTokenGetter;
-
-  constructor(url: string) {
-    super(url);
-    this.rpcUrl = url;
-  }
-
-  setAuthTokenGetter(getter: AuthTokenGetter): void {
-    this.getAuthToken = getter;
-  }
-
-  setIsZKsyncOS(isZKsyncOS: boolean) {
-    this.isZKsyncOS = isZKsyncOS;
-  }
-
-  setL1Provider(l1Provider: EthersProvider) {
-    this.l1Provider = l1Provider;
-  }
-
-  /// method overriden to use L1 calls instead of zks_ method for compatibility with ZKsync OS
-  override async getBaseTokenContractAddress(): Promise<string> {
-    const bridgehubAddress = await this.getBridgehubContractAddress();
-    const bridgehub = IBridgehub__factory.connect(bridgehubAddress, this.l1Provider);
-    const chainId = (await this.getNetwork()).chainId;
-    return await bridgehub.baseToken(chainId);
-  }
-
-  override async estimateFee(transaction: TransactionRequest): Promise<Fee> {
-    if (!this.isZKsyncOS) {
-      return super.estimateFee(transaction);
-    } else {
-      const gasPrice = await this.getGasPrice();
-      return {
-        gasLimit: 0n, // return smth, it shouldn't be used
-        gasPerPubdataLimit: 1n,
-        maxPriorityFeePerGas: 0n,
-        maxFeePerGas: gasPrice * 2n,
-      };
-    }
-  }
-
-  /**
-   * Override send method to intercept and log JSON-RPC calls
-   */
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,7 +31,7 @@ function getRpcUrl(provider: any): string | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ctor<T = object> = new (...args: any[]) => T;
 
-const LoggingProviderMixing = <TBase extends Ctor<EthersJsonRpcProvider>>(Base: TBase) => {
+const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase) => {
   return class LoggingProvider extends Base {
     private requestId: number = 1;
 
@@ -225,5 +169,4 @@ async function sendAuthorizedRpcRequest(
   return data.result;
 }
 
-export const LoggingZkSyncProvider = LoggingProviderMixing(ZkSyncOsProvider);
-export const LoggingEthersJsonRpcProvider = LoggingProviderMixing(AuthableEthersJsonRpcProvider);
+export const LoggingJsonRpcProvider = LoggingProviderMixing(AuthableEthersJsonRpcProvider);

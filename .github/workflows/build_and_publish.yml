@@ -1,4 +1,4 @@
-name: Build and publish era-watchdog image
+name: Build and publish watchdog image
 
 on:
   push:
@@ -46,10 +46,9 @@ jobs:
         with:
           push: ${{ startsWith(github.ref, 'refs/tags') || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
           tags: |
-            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-watchdog:latest"
-            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-watchdog:${{ steps.buildid.outputs.BUILD_ID }}"
-            "matterlabs/watchdog:${{ steps.buildid.outputs.BUILD_ID }}"
+            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/watchdog:latest"
+            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/watchdog:${{ steps.buildid.outputs.BUILD_ID }}"
           labels: |
-            org.opencontainers.image.source=https://github.com/matter-labs/era-watchdog
+            org.opencontainers.image.source=https://github.com/matter-labs/watchdog
             org.opencontainers.image.licenses="MIT"
           file: Dockerfile
