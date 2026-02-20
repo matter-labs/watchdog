@@ -1,0 +1,55 @@
+name: Build and publish era-watchdog image
+
+on:
+  push:
+    branches: ["main", "develop"]
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "main"
+
+jobs:
+  push_to_registry:
+    name: Build and push Docker image
+    runs-on: [matterlabs-ci-runner]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Auth to google artifact registry
+        run: |
+          gcloud auth configure-docker us-docker.pkg.dev -q
+
+      - name: Generate build ID for Flux Image Automation
+        id: buildid
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "::set-output name=BUILD_ID::${GITHUB_REF#refs/*/}"
+          else
+            sha=$(git rev-parse --short HEAD)
+            ts=$(date +%s%N | cut -b1-13)
+            echo "::set-output name=BUILD_ID::${sha}-${ts}"
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
+        with:
+          push: ${{ startsWith(github.ref, 'refs/tags') || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          tags: |
+            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-watchdog:latest"
+            "us-docker.pkg.dev/matterlabs-infra/matterlabs-docker/era-watchdog:${{ steps.buildid.outputs.BUILD_ID }}"
+            "matterlabs/watchdog:${{ steps.buildid.outputs.BUILD_ID }}"
+          labels: |
+            org.opencontainers.image.source=https://github.com/matter-labs/era-watchdog
+            org.opencontainers.image.licenses="MIT"
+          file: Dockerfile
