@@ -1,0 +1,41 @@
+{
+  "name": "zksync-os-watchdog",
+  "version": "0.1.0",
+  "description": "Watchdog for ZKsync OS chains",
+  "repository": "git@github.com:matter-labs/watchdog.git",
+  "author": "Matter Labs",
+  "license": "MIT",
+  "private": true,
+  "prettier": "@matterlabs/prettier-config",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc -p . --noEmit",
+    "lint": "eslint src --fix --max-warnings=0",
+    "lint:check": "eslint src --max-warnings=0",
+    "start": "ts-node src/main.ts"
+  },
+  "devDependencies": {
+    "@matterlabs/eslint-config-typescript": "^1.1.2",
+    "@matterlabs/prettier-config": "^1.0.3",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.16.0",
+    "@typescript-eslint/parser": "^8.16.0",
+    "eslint": "^9.15.0",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "prettier": "^3.4.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@matterlabs/zksync-js": "^0.0.9",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.16.0",
+    "express": "^4.21.1",
+    "prom-client": "^15.1.3",
+    "winston": "^3.17.0"
+  },
+  "packageManager": "yarn@1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610"
+}
