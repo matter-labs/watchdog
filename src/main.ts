@@ -22,13 +22,23 @@ import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
 
 import type { PrividiumTokenStore } from "./prividiumAuth";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
+import type { JsonRpcApiProviderOptions } from "ethers";
+
+function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProviderOptions {
+  return {
+    ...opts,
+    staticNetwork: true, // avoid repeated eth_chainId calls
+  };
+}
 
 const main = async () => {
   setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
-  const l2Provider = new LoggingJsonRpcProvider(unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"), undefined, {
-    pollingInterval: l2PollingInterval,
-  });
+  const l2Provider = new LoggingJsonRpcProvider(
+    unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"),
+    undefined,
+    getProviderOptions({ pollingInterval: l2PollingInterval })
+  );
   let enabledFlows = 0;
 
   // Prividium flow is only available in ZKsync OS mode
@@ -57,8 +67,12 @@ const main = async () => {
     if (!_l1Provider) {
       const l1RpcUrl = unwrap(process.env.CHAIN_L1_RPC_URL, "CHAIN_L1_RPC_URL");
       _l1Provider = process.env.L1_POLLING_INTERVAL
-        ? new JsonRpcProvider(l1RpcUrl, undefined, { pollingInterval: +process.env.L1_POLLING_INTERVAL })
-        : new JsonRpcProvider(l1RpcUrl);
+        ? new JsonRpcProvider(
+            l1RpcUrl,
+            undefined,
+            getProviderOptions({ pollingInterval: +process.env.L1_POLLING_INTERVAL })
+          )
+        : new JsonRpcProvider(l1RpcUrl, undefined, getProviderOptions());
     }
     return _l1Provider;
   };
