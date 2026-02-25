@@ -65,6 +65,13 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
           rpcResponse: {
             id,
             method,
+          },
+        });
+        // Log the full response result at a lower level to avoid cluttering logs, but still have it available for debugging when needed
+        winston.silly(`[JSON-RPC Response Result] ID: ${id} Method: ${method}`, {
+          rpcResponse: {
+            id,
+            method,
             result: JSON.stringify(result, (_, value) => (typeof value === "bigint" ? value.toString() : value)),
           },
         });
