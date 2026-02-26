@@ -109,19 +109,23 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         let timer: null | NodeJS.Timeout = null;
 
         const listener = async (receipt: TransactionReceipt) => {
-          await this.once(hash, listener);
           try {
             if ((await receipt.confirmations()) >= confirms) {
               resolve(receipt);
-              await this.off(hash, listener);
               if (timer) {
                 clearTimeout(timer);
                 timer = null;
               }
-              return;
+            } else {
+              await this.once(hash, listener);
             }
           } catch (error) {
             winston.error("Error in waitForTransaction", error);
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+            reject(error);
           }
         };
 
