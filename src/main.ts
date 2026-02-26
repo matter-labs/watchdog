@@ -28,6 +28,7 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
   return {
     ...opts,
     staticNetwork: true, // avoid repeated eth_chainId calls
+    cacheTimeout: -1, // disable internal caching as providers are shared between flows and caching can lead to stale data
   };
 }
 
@@ -70,7 +71,9 @@ const main = async () => {
         ? new JsonRpcProvider(
             l1RpcUrl,
             undefined,
-            getProviderOptions({ pollingInterval: +process.env.L1_POLLING_INTERVAL })
+            getProviderOptions({
+              pollingInterval: +process.env.L1_POLLING_INTERVAL,
+            })
           )
         : new JsonRpcProvider(l1RpcUrl, undefined, getProviderOptions());
     }
