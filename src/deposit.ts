@@ -104,7 +104,7 @@ export class DepositFlow extends DepositBaseFlow {
 
           return { l1Tx: txReceipt, depositHandle };
         },
-      });
+      }); // included in a block on L1
 
       const l2TxHash = getL2TransactionHashFromLogs(l1Tx!.logs);
       const txHashes = `(L1: ${l1Tx?.hash}, L2: ${l2TxHash})`;
