@@ -92,23 +92,17 @@ export class DepositFlow extends DepositBaseFlow {
       }
 
       // send L1 deposit transaction
-      const depositHandle = await this.metricRecorder.stepExecution({
-        stepName: STEPS.send,
-        stepTimeoutMs: 30 * SEC,
-        fn: () => this.sdk.deposits.create(deposit.params),
-      });
-      this.logger.info(`Tx (L1: ${depositHandle.l1TxHash}) sent on L1`);
-
-      // wait for transaction
-      const l1Tx = await this.metricRecorder.stepExecution({
+      const { l1Tx, depositHandle } = await this.metricRecorder.stepExecution({
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
+          const depositHandle = await this.sdk.deposits.create(deposit.params);
           const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));
           recordStepGasCost(unwrap(txReceipt?.gasUsed) * unwrap(txReceipt?.gasPrice));
-          return txReceipt;
+
+          return { l1Tx: txReceipt, depositHandle };
         },
       }); // included in a block on L1
 
