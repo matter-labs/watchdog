@@ -11,11 +11,13 @@ export type AuthTokenGetter = () => string | null;
  */
 class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   declare readonly rpcUrl?: string;
+  declare readonly walletAddress: string;
   getAuthToken?: AuthTokenGetter;
 
-  constructor(url?: string, network?: Networkish, options?: JsonRpcApiProviderOptions) {
+  constructor(walletAdddress: string, url?: string, network?: Networkish, options?: JsonRpcApiProviderOptions) {
     super(url, network, options);
     this.rpcUrl = url;
+    this.walletAddress = walletAdddress;
   }
 
   setAuthTokenGetter(getter: AuthTokenGetter): void {
@@ -26,6 +28,11 @@ class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getRpcUrl(provider: any): string | undefined {
   return provider.rpcUrl ?? provider._getConnection?.()?.url;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getWalletAddress(provider: any): string {
+  return provider.walletAddress;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +62,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         const url = getRpcUrl(self);
 
         if (token && url) {
-          result = await sendAuthorizedRpcRequest(url, token, id, method, params);
+          result = await sendAuthorizedRpcRequest(getWalletAddress(this), url, token, id, method, params);
         } else {
           result = await super.send(method, params);
         }
@@ -146,13 +153,44 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
   };
 };
 
+function adjustParamsForPrividium(
+  walletAddress: string,
+  method: string,
+  params: unknown[] | Record<string, unknown>
+): unknown[] | Record<string, unknown> {
+  if (Array.isArray(params) && params.length > 0) {
+    // add default 'from' address to the `eth_call` request if not provided, to avoid Prividium
+    // rejecting the request with `eth_call always has to specify from address` error.
+    if (method === "eth_call") {
+      if (params[0] !== null && typeof params[0] === "object") {
+        return [
+          {
+            from: walletAddress,
+            ...params[0],
+          },
+          ...(params.length > 1 ? params.slice(1) : []),
+        ];
+      }
+    }
+    // Remove `stateOverrides` from `eth_estimateGas` params to avoid Prividium rejecting
+    // the request with `state overrides are not supported` error.
+    if (method === "eth_estimateGas" && params.length > 2) {
+      return [params[0], params[1]];
+    }
+  }
+  return params;
+}
+
 async function sendAuthorizedRpcRequest(
+  walletAddress: string,
   url: string,
   token: string,
   id: number,
   method: string,
-  params: unknown[] | Record<string, unknown>
+  requestParams: unknown[] | Record<string, unknown>
 ) {
+  const params = adjustParamsForPrividium(walletAddress, method, requestParams);
+
   const body = JSON.stringify({
     jsonrpc: "2.0",
     id,
