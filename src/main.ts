@@ -35,7 +35,9 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
 const main = async () => {
   setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
+  const wallet = new EthersWallet(unwrap(process.env.WALLET_KEY, "WALLET_KEY"));
   const l2Provider = new LoggingJsonRpcProvider(
+    wallet.address,
     unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"),
     undefined,
     getProviderOptions({ pollingInterval: l2PollingInterval })
@@ -59,7 +61,7 @@ const main = async () => {
     enabledFlows++;
   }
 
-  const wallet = new EthersWallet(unwrap(process.env.WALLET_KEY, "WALLET_KEY"), l2Provider);
+  const l2Wallet = wallet.connect(l2Provider);
   const l2WalletLock = new Mutex();
 
   // Lazy initialization of L1 provider, zkSync client and SDK, as they are only needed for some flows
@@ -83,7 +85,7 @@ const main = async () => {
   let _client: EthersClient | undefined;
   const getClient = async () => {
     if (!_client) {
-      _client = await createEthersClient({ l1: getL1Provider(), l2: l2Provider, signer: wallet });
+      _client = await createEthersClient({ l1: getL1Provider(), l2: l2Provider, signer: l2Wallet });
     }
     return _client;
   };
@@ -98,13 +100,13 @@ const main = async () => {
   //
 
   winston.info(
-    `Wallet ${wallet.address} L2 balance is ${ethers.formatEther(await l2Provider.getBalance(wallet.address))}`
+    `Wallet ${l2Wallet.address} L2 balance is ${ethers.formatEther(await l2Provider.getBalance(l2Wallet.address))}`
   );
-  recordWalletInfo(wallet.address);
+  recordWalletInfo(l2Wallet.address);
 
   if (process.env.FLOW_TRANSFER_ENABLE === "1") {
     new SimpleTxFlow(
-      wallet,
+      l2Wallet,
       l2WalletLock,
       l2Provider,
       +unwrap(process.env.FLOW_TRANSFER_INTERVAL, "FLOW_TRANSFER_INTERVAL")
@@ -121,7 +123,7 @@ const main = async () => {
     const zkChainAddress = await bridgehub.getHyperchain(chainId);
 
     new DepositFlow(
-      wallet,
+      l2Wallet,
       client,
       sdk,
       l1AssetRouter,
@@ -135,7 +137,7 @@ const main = async () => {
 
   if (process.env.FLOW_WITHDRAWAL_ENABLE === "1") {
     new WithdrawalFlow(
-      wallet,
+      l2Wallet,
       l2WalletLock,
       +unwrap(process.env.FLOW_WITHDRAWAL_INTERVAL, "FLOW_WITHDRAWAL_INTERVAL"),
       await getSdk()
@@ -145,7 +147,7 @@ const main = async () => {
 
   if (process.env.FLOW_WITHDRAWAL_FINALIZE_ENABLE === "1") {
     new WithdrawalFinalizeFlow(
-      wallet,
+      l2Wallet,
       await getClient(),
       +unwrap(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL, "FLOW_WITHDRAWAL_FINALIZE_INTERVAL")
     ).run();
