@@ -166,6 +166,31 @@ Options:
 - `FLOW_PRIVIDIUM_API_URL` -- Base URL of the Prividium permissions API (e.g., `https://permissions-api.testnet-prividium.zksync.dev`). The flow appends `/api/siwe-messages` and `/api/auth/login/crypto-native` automatically.
 - `FLOW_PRIVIDIUM_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
 
+#### Permissions:
+Some flows require specific permissions to be granted to the watchdog address. Make sure to configure them for the flow to work:
+
+**Deposit flow permissions:**
+
+Contract: `Native Token Vault` (`0x0000000000000000000000000000000000010004`),
+function permissions:
+  * `BASE_TOKEN_ASSET_ID` - read
+  * `L1_CHAIN_ID` - read
+  * `WETH_TOKEN` - read
+  * `originChainId` - read
+
+
+**Withdrawal flow permissions:**
+
+Contract: `Base Token` (`0x000000000000000000000000000000000000800A`),
+function permissions:
+  * `withdraw` - write
+
+**Withdrawal finalization flow permissions:**
+
+Contract: `Base Token` (`0x000000000000000000000000000000000000800A`),
+event permissions:
+* `Withdrawal`: topic1: `User Addr` topic2: `User Addr`
+
 ---
 
 ## License
