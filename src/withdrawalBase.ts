@@ -7,12 +7,32 @@ import { SEC, unwrap } from "./utils";
 
 import type { TransactionReceipt, Wallet } from "ethers";
 
-export type ExecutionResultUnknown = null;
-export type ExecutionResultKnown = {
+export type ExecutionResult = {
   l2Receipt: TransactionReceipt;
   timestampL2: number;
 };
-export type ExecutionResult = ExecutionResultUnknown | ExecutionResultKnown;
+
+const WITHDRAWAL_RECEIPT_STORE_SIZE = 10;
+
+export class WithdrawalReceiptStore {
+  private entries: ExecutionResult[] = [];
+
+  add(l2Receipt: TransactionReceipt, timestampL2: number): void {
+    this.entries.push({ l2Receipt, timestampL2 });
+    if (this.entries.length > WITHDRAWAL_RECEIPT_STORE_SIZE) {
+      this.entries.shift();
+    }
+  }
+
+  getLatestFinalized(finalizedBlockNumber: number): ExecutionResult | null {
+    for (let i = this.entries.length - 1; i >= 0; i--) {
+      if (this.entries[i].l2Receipt.blockNumber <= finalizedBlockNumber) {
+        return this.entries[i];
+      }
+    }
+    return null;
+  }
+}
 
 export const STEPS = {
   estimation: "estimation",
@@ -42,7 +62,7 @@ export abstract class WithdrawalBaseFlow extends BaseFlow {
   protected async getLastExecution(
     blockType: "latest" | "finalized",
     wallet: string | undefined
-  ): Promise<ExecutionResult> {
+  ): Promise<ExecutionResult | null> {
     // early return if we intended to disable this functionality
     if (process.env.MAX_LOGS_BLOCKS_L2 == "0") return null;
     const topBlock = await this.wallet.provider!.getBlock(blockType);

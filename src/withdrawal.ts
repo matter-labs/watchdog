@@ -8,6 +8,7 @@ import { SEC, unwrap, timeoutPromise } from "./utils";
 import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
+import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawParams } from "@matterlabs/zksync-js/core";
 import type { EthersSdk } from "@matterlabs/zksync-js/ethers/sdk";
 import type { Wallet } from "ethers";
@@ -19,7 +20,8 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     wallet: Wallet,
     private l2WalletLock: Mutex,
     private intervalMs: number,
-    private sdk: EthersSdk
+    private sdk: EthersSdk,
+    private receiptStore: WithdrawalReceiptStore
   ) {
     super(wallet, FLOW_NAME);
   }
@@ -73,6 +75,8 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));
+          const block = await receipt.getBlock();
+          this.receiptStore.add(receipt, block.timestamp);
         },
       });
 

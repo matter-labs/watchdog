@@ -7,6 +7,7 @@ import { Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
+import { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 import type { Wallet } from "ethers";
 
@@ -21,7 +22,8 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: Wallet,
     private client: EthersClient,
-    private intervalMs: number = FINALIZE_INTERVAL
+    private intervalMs: number = FINALIZE_INTERVAL,
+    private receiptStore: WithdrawalReceiptStore
   ) {
     super(wallet, FLOW_NAME);
     this.finalizationService = createFinalizationServices(this.client);
@@ -36,10 +38,13 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   }
   protected async executeWithdrawalFinalize(): Promise<Status> {
     try {
-      const execution = await this.getLastExecution("finalized", this.wallet.address);
       const blockTimestamp = await this.getCurrentChainTimestamp();
-      const finalizedBlockTimestamp = await this.getLatestFinalizedBlockTimestamp();
+      const finalizedBlock = unwrap(await this.wallet.provider!.getBlock("finalized"));
       this.metricRecorder.recordFlowStart();
+
+      const execution =
+        this.receiptStore.getLatestFinalized(finalizedBlock.number) ??
+        await this.getLastExecution("finalized", this.wallet.address);
 
       if (!execution) {
         this.logger.warn("No withdrawal found to try finalize");
@@ -49,7 +54,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       const withdrawalHash = execution.l2Receipt.hash;
 
       this.metricTimeSinceLastFinalizableWithdrawal.set(blockTimestamp - execution.timestampL2);
-      this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlockTimestamp);
+      this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlock.timestamp);
 
       this.logger.info(`Simulating finalization for withdrawal hash: ${withdrawalHash}`);
 
