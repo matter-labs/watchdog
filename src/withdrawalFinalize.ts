@@ -7,7 +7,7 @@ import { Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
-import { WithdrawalReceiptStore } from "./withdrawalBase";
+import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 import type { Wallet } from "ethers";
 
@@ -43,8 +43,8 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       this.metricRecorder.recordFlowStart();
 
       const execution =
-        this.receiptStore.getLatestFinalized(finalizedBlock.number) ??
-        await this.getLastExecution("finalized", this.wallet.address);
+        this.receiptStore.getLatestFinalized(finalizedBlock?.number) ??
+        (await this.getLastExecution("finalized", this.wallet.address));
 
       if (!execution) {
         this.logger.warn("No withdrawal found to try finalize");

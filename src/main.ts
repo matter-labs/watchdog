@@ -18,8 +18,8 @@ import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
 import { SEC, unwrap } from "./utils";
 import { WithdrawalFlow } from "./withdrawal";
-import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
 import { WithdrawalReceiptStore } from "./withdrawalBase";
+import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
 
 import type { PrividiumTokenStore } from "./prividiumAuth";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
