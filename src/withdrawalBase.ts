@@ -96,8 +96,4 @@ export abstract class WithdrawalBaseFlow extends BaseFlow {
   protected async getCurrentChainTimestamp(): Promise<number> {
     return unwrap(await this.wallet.provider!.getBlock("latest").then((block) => block?.timestamp));
   }
-
-  protected async getLatestFinalizedBlockTimestamp(): Promise<number> {
-    return unwrap(await this.wallet.provider!.getBlock("finalized").then((block) => block?.timestamp));
-  }
 }
