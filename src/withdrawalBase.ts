@@ -14,6 +14,9 @@ export type ExecutionResultKnown = {
 };
 export type ExecutionResult = ExecutionResultUnknown | ExecutionResultKnown;
 
+// number of stored withdrawal receipts that are used in the finalization flow to check if there are any finalizable
+// withdrawals. Given the withdrawal flow running interval, 10 latest receipts should be enough to cover all
+// finalizable withdrawals.
 const WITHDRAWAL_RECEIPT_STORE_SIZE = 10;
 
 export class WithdrawalReceiptStore {
@@ -26,7 +29,7 @@ export class WithdrawalReceiptStore {
     }
   }
 
-  getLatestFinalized(finalizedBlockNumber: number | null): ExecutionResult {
+  getLatestFinalized(finalizedBlockNumber: number | null | undefined): ExecutionResultKnown | null {
     if (finalizedBlockNumber != null) {
       for (let i = this.entries.length - 1; i >= 0; i--) {
         if (this.entries[i].l2Receipt.blockNumber <= finalizedBlockNumber) {

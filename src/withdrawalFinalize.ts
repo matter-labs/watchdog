@@ -39,7 +39,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   protected async executeWithdrawalFinalize(): Promise<Status> {
     try {
       const blockTimestamp = await this.getCurrentChainTimestamp();
-      const finalizedBlock = unwrap(await this.wallet.provider!.getBlock("finalized"));
+      const finalizedBlock = await this.wallet.provider!.getBlock("finalized");
       this.metricRecorder.recordFlowStart();
 
       const execution =
@@ -54,7 +54,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       const withdrawalHash = execution.l2Receipt.hash;
 
       this.metricTimeSinceLastFinalizableWithdrawal.set(blockTimestamp - execution.timestampL2);
-      this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlock.timestamp);
+      this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlock!.timestamp);
 
       this.logger.info(`Simulating finalization for withdrawal hash: ${withdrawalHash}`);
 
