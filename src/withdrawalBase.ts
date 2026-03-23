@@ -14,6 +14,33 @@ export type ExecutionResultKnown = {
 };
 export type ExecutionResult = ExecutionResultUnknown | ExecutionResultKnown;
 
+// number of stored withdrawal receipts that are used in the finalization flow to check if there are any finalizable
+// withdrawals. Given the withdrawal flow running interval, 10 latest receipts should be enough to cover all
+// finalizable withdrawals.
+const WITHDRAWAL_RECEIPT_STORE_SIZE = 10;
+
+export class WithdrawalReceiptStore {
+  private entries: ExecutionResultKnown[] = [];
+
+  add(l2Receipt: TransactionReceipt, timestampL2: number): void {
+    this.entries.push({ l2Receipt, timestampL2 });
+    if (this.entries.length > WITHDRAWAL_RECEIPT_STORE_SIZE) {
+      this.entries.shift();
+    }
+  }
+
+  getLatestFinalized(finalizedBlockNumber: number | null | undefined): ExecutionResultKnown | null {
+    if (finalizedBlockNumber != null) {
+      for (let i = this.entries.length - 1; i >= 0; i--) {
+        if (this.entries[i].l2Receipt.blockNumber <= finalizedBlockNumber) {
+          return this.entries[i];
+        }
+      }
+    }
+    return null;
+  }
+}
+
 export const STEPS = {
   estimation: "estimation",
   send: "send",
@@ -71,9 +98,5 @@ export abstract class WithdrawalBaseFlow extends BaseFlow {
 
   protected async getCurrentChainTimestamp(): Promise<number> {
     return unwrap(await this.wallet.provider!.getBlock("latest").then((block) => block?.timestamp));
-  }
-
-  protected async getLatestFinalizedBlockTimestamp(): Promise<number> {
-    return unwrap(await this.wallet.provider!.getBlock("finalized").then((block) => block?.timestamp));
   }
 }

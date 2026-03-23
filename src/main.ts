@@ -18,6 +18,7 @@ import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
 import { SEC, unwrap } from "./utils";
 import { WithdrawalFlow } from "./withdrawal";
+import { WithdrawalReceiptStore } from "./withdrawalBase";
 import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
 
 import type { PrividiumTokenStore } from "./prividiumAuth";
@@ -135,12 +136,15 @@ const main = async () => {
     enabledFlows++;
   }
 
+  const withdrawalReceiptStore = new WithdrawalReceiptStore();
+
   if (process.env.FLOW_WITHDRAWAL_ENABLE === "1") {
     new WithdrawalFlow(
       l2Wallet,
       l2WalletLock,
       +unwrap(process.env.FLOW_WITHDRAWAL_INTERVAL, "FLOW_WITHDRAWAL_INTERVAL"),
-      await getSdk()
+      await getSdk(),
+      withdrawalReceiptStore
     ).run();
     enabledFlows++;
   }
@@ -149,7 +153,8 @@ const main = async () => {
     new WithdrawalFinalizeFlow(
       l2Wallet,
       await getClient(),
-      +unwrap(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL, "FLOW_WITHDRAWAL_FINALIZE_INTERVAL")
+      +unwrap(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL, "FLOW_WITHDRAWAL_FINALIZE_INTERVAL"),
+      withdrawalReceiptStore
     ).run();
     enabledFlows++;
   }
