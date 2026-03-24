@@ -8,8 +8,8 @@ export interface PrividiumTokenStore {
 }
 
 export interface SiweMessageResponse {
-  nonce: string;
   msg: string;
+  nonceToken?: string;
 }
 
 /** Response from Prividium verify endpoint; adapt to actual API shape. */
@@ -52,7 +52,9 @@ export async function runSiweFlow(
   const verifyRes = await fetch(`${apiUrl}/api/auth/login/crypto-native`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ message: messageData.msg, signature }),
+    // The `nonceToken` is only present for Prividium v1.165.0+.
+    // It will be omitted for older versions as it is not returned in prior versions.
+    body: JSON.stringify({ message: messageData.msg, signature, nonceToken: messageData.nonceToken }),
   });
 
   if (!verifyRes.ok) {
