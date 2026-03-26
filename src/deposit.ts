@@ -13,7 +13,7 @@ import {
   STEPS,
   getErc20Contract,
 } from "./depositBase";
-import { recordL1Balances, Status } from "./flowMetric";
+import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
 import type { DepositParams } from "@matterlabs/zksync-js/core";
@@ -52,12 +52,13 @@ export class DepositFlow extends DepositBaseFlow {
           this.logger.info(`Base token ${this.baseToken} already has approval`);
         }
         const baseTokenBalance = await erc20Contract.balanceOf(this.wallet.address);
-        const l1EthBalance = await this.client.l1.getBalance(this.wallet.address);
-        this.logger.info(
-          `L1 balance: Base token (${this.baseToken}) ${formatEther(baseTokenBalance.toString())}; ETH: ${formatEther(l1EthBalance.toString())}`
-        );
-        recordL1Balances(baseTokenBalance, l1EthBalance);
+        this.logger.info(`L1 base token (${this.baseToken}) balance: ${formatEther(baseTokenBalance.toString())}`);
+        recordL1BaseTokenBalance(baseTokenBalance);
       }
+
+      const l1EthBalance = await this.client.l1.getBalance(this.wallet.address);
+      this.logger.info(`L1 ETH balance: ${formatEther(l1EthBalance.toString())}`);
+      recordL1EthBalance(l1EthBalance);
 
       this.metricRecorder.recordFlowStart();
 

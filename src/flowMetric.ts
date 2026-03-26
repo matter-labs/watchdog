@@ -98,8 +98,11 @@ export function recordL2BaseTokenBalance(balance: number | bigint) {
   store.metric_wallet_balance.set({ balance_type: "l2_base_token" }, Number(balance));
 }
 
-export function recordL1Balances(baseTokenBalance: number | bigint, ethBalance: number | bigint) {
+export function recordL1BaseTokenBalance(baseTokenBalance: number | bigint) {
   store.metric_wallet_balance.set({ balance_type: "l1_base_token" }, Number(baseTokenBalance));
+}
+
+export function recordL1EthBalance(ethBalance: number | bigint) {
   store.metric_wallet_balance.set({ balance_type: "l1_eth" }, Number(ethBalance));
 }
 
