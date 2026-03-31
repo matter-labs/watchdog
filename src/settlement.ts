@@ -36,7 +36,7 @@ export class SettlementFlow extends BaseFlow {
 
         await this.metricRecorder.stepExecution({
           stepName: "settlement",
-          stepTimeoutMs: 2 * SEC,
+          stepTimeoutMs: 10 * SEC,
           fn: async () => {
             // Get the last settled block on L2
             const lastSettledBlock = await this.l2Provider.getBlock("finalized");
