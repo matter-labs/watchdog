@@ -49,12 +49,13 @@ export const DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI =
   BigInt(+(process.env.FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI ?? 1000)) * GWEI;
 
 export abstract class DepositBaseFlow extends BaseFlow {
+  protected sharedBridge!: Contract;
+  protected zkChainAddress!: string;
+  protected chainId!: bigint;
+
   constructor(
     protected wallet: Wallet,
     protected client: EthersClient,
-    protected sharedBridge: Contract,
-    protected zkChainAddress: string,
-    protected chainId: bigint,
     flowName: string
   ) {
     super(flowName);

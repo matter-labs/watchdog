@@ -93,8 +93,12 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
     this.logger.info(`Starting withdrawal finalize flow with interval ${this.intervalMs / MIN} minutes`);
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-
-      await this.executeWithdrawalFinalize();
+      try {
+        await this.executeWithdrawalFinalize();
+      } catch (error) {
+        this.logger.error("Error while executing withdrawal finalize flow", error);
+        this.metricRecorder.recordFlowFailure();
+      }
       await nextExecutionWait;
     }
   }

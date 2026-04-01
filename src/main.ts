@@ -72,12 +72,12 @@ const main = async () => {
       const l1RpcUrl = unwrap(process.env.CHAIN_L1_RPC_URL, "CHAIN_L1_RPC_URL");
       _l1Provider = process.env.L1_POLLING_INTERVAL
         ? new JsonRpcProvider(
-            l1RpcUrl,
-            undefined,
-            getProviderOptions({
-              pollingInterval: +process.env.L1_POLLING_INTERVAL,
-            })
-          )
+          l1RpcUrl,
+          undefined,
+          getProviderOptions({
+            pollingInterval: +process.env.L1_POLLING_INTERVAL,
+          })
+        )
         : new JsonRpcProvider(l1RpcUrl, undefined, getProviderOptions());
     }
     return _l1Provider;
@@ -100,9 +100,14 @@ const main = async () => {
   };
   //
 
-  winston.info(
-    `Wallet ${l2Wallet.address} L2 balance is ${ethers.formatEther(await l2Provider.getBalance(l2Wallet.address))}`
-  );
+  l2Provider
+    .getBalance(l2Wallet.address)
+    .then((balance) => {
+      winston.info(`Wallet ${l2Wallet.address} L2 balance is ${ethers.formatEther(balance)}`);
+    })
+    .catch((err) => {
+      winston.error("Error fetching L2 balance for wallet " + l2Wallet.address, err);
+    });
   recordWalletInfo(l2Wallet.address);
 
   if (process.env.FLOW_TRANSFER_ENABLE === "1") {
@@ -118,21 +123,7 @@ const main = async () => {
   if (process.env.FLOW_DEPOSIT_ENABLE === "1") {
     const client = await getClient();
     const sdk = await getSdk();
-    const { bridgehub, l1AssetRouter } = await sdk.contracts.instances();
-    const chainId = (await l2Provider.getNetwork()).chainId;
-    const baseToken = await client.baseToken(chainId);
-    const zkChainAddress = await bridgehub.getHyperchain(chainId);
-
-    new DepositFlow(
-      l2Wallet,
-      client,
-      sdk,
-      l1AssetRouter,
-      zkChainAddress,
-      chainId,
-      baseToken,
-      +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")
-    ).run();
+    new DepositFlow(l2Wallet, client, sdk, +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")).run();
     enabledFlows++;
   }
 

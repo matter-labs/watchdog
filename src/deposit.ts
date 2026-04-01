@@ -18,22 +18,20 @@ import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
 import type { DepositParams } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
-import type { Wallet, Contract } from "ethers";
+import type { Wallet } from "ethers";
 
 const FLOW_NAME = "deposit";
 
 export class DepositFlow extends DepositBaseFlow {
+  private baseToken!: string;
+
   constructor(
     wallet: Wallet,
     client: EthersClient,
     private sdk: EthersSdk,
-    sharedBridge: Contract,
-    zkChainAddress: string,
-    chainId: bigint,
-    private baseToken: string,
     private intervalMs: number
   ) {
-    super(wallet, client, sharedBridge, zkChainAddress, chainId, FLOW_NAME);
+    super(wallet, client, FLOW_NAME);
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -135,44 +133,63 @@ export class DepositFlow extends DepositBaseFlow {
   }
 
   public async run() {
-    const lastExecution = await this.getLastExecution(this.wallet.address);
-    const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
-    const timeSinceLastDepositSec = currentBlockchainTimestamp - lastExecution.timestampL1;
-    if (lastExecution.status != null) this.metricRecorder.recordPreviousExecutionStatus(lastExecution.status!);
-    if (timeSinceLastDepositSec < this.intervalMs / SEC) {
-      const waitTime = this.intervalMs - timeSinceLastDepositSec * SEC;
-      this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting deposit flow`);
-      await timeoutPromise(waitTime);
+    try {
+      const lastExecution = await this.getLastExecution(this.wallet.address);
+      const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
+      const timeSinceLastDepositSec = currentBlockchainTimestamp - lastExecution.timestampL1;
+      if (lastExecution.status != null) this.metricRecorder.recordPreviousExecutionStatus(lastExecution.status!);
+      if (timeSinceLastDepositSec < this.intervalMs / SEC) {
+        const waitTime = this.intervalMs - timeSinceLastDepositSec * SEC;
+        this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting deposit flow`);
+        await timeoutPromise(waitTime);
+      }
+    } catch (err) {
+      this.logger.warn("Failed to get last execution, starting immediately.", err);
     }
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      let attempt: number = 1;
-      while (attempt <= DEPOSIT_RETRY_LIMIT) {
-        const result = await this.executeWatchdogDeposit();
-        switch (result) {
-          case Status.OK:
-            this.logger.info(`attempt ${attempt} succeeded`);
-            break;
-          case Status.SKIP:
-            this.logger.info(`attempt ${attempt} skipped (not counted towards limit)`);
-            break;
-          case Status.FAIL: {
-            this.logger.warn(
-              `[deposit] attempt ${attempt} of ${DEPOSIT_RETRY_LIMIT} failed` +
-                (attempt < DEPOSIT_RETRY_LIMIT
-                  ? `, retrying in ${(DEPOSIT_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
-                  : "")
-            );
-            attempt++;
-            await timeoutPromise(DEPOSIT_RETRY_INTERVAL);
-            break;
-          }
-          default: {
-            const _exhaustiveCheck: never = result;
-            throw new Error(`Unreachable code branch: ${_exhaustiveCheck}`);
-          }
+      try {
+        if (!this.chainId) {
+          const { bridgehub, l1AssetRouter } = await this.sdk.contracts.instances();
+          const chainId = (await this.wallet.provider!.getNetwork()).chainId;
+          const baseToken = await this.client.baseToken(chainId);
+          const zkChainAddress = await bridgehub.getHyperchain(chainId);
+          this.sharedBridge = l1AssetRouter;
+          this.chainId = chainId;
+          this.baseToken = baseToken;
+          this.zkChainAddress = zkChainAddress;
         }
-        if (result === Status.OK || result === Status.SKIP) break;
+        let attempt: number = 1;
+        while (attempt <= DEPOSIT_RETRY_LIMIT) {
+          const result = await this.executeWatchdogDeposit();
+          switch (result) {
+            case Status.OK:
+              this.logger.info(`attempt ${attempt} succeeded`);
+              break;
+            case Status.SKIP:
+              this.logger.info(`attempt ${attempt} skipped (not counted towards limit)`);
+              break;
+            case Status.FAIL: {
+              this.logger.warn(
+                `[deposit] attempt ${attempt} of ${DEPOSIT_RETRY_LIMIT} failed` +
+                  (attempt < DEPOSIT_RETRY_LIMIT
+                    ? `, retrying in ${(DEPOSIT_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
+                    : "")
+              );
+              attempt++;
+              await timeoutPromise(DEPOSIT_RETRY_INTERVAL);
+              break;
+            }
+            default: {
+              const _exhaustiveCheck: never = result;
+              throw new Error(`Unreachable code branch: ${_exhaustiveCheck}`);
+            }
+          }
+          if (result === Status.OK || result === Status.SKIP) break;
+        }
+      } catch (error) {
+        this.logger.error("Error while executing deposit flow", error);
+        this.metricRecorder.recordFlowFailure();
       }
       await nextExecutionWait;
     }

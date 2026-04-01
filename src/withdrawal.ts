@@ -91,37 +91,45 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
   }
 
   public async run() {
-    const lastExecution = await this.getLastExecution("latest", this.wallet.address);
-    const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
-    const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
-    if (lastExecution != null) {
-      this.metricRecorder.recordPreviousExecutionStatus(
-        lastExecution.l2Receipt.status === 1 ? StatusNoSkip.OK : StatusNoSkip.FAIL
-      );
-    }
-    if (timeSinceLastWithdrawalSec < this.intervalMs / SEC) {
-      const waitTime = this.intervalMs - timeSinceLastWithdrawalSec * SEC;
-      this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting withdrawal flow`);
-      await timeoutPromise(waitTime);
-    }
     while (true) {
-      const nextExecutionWait = timeoutPromise(this.intervalMs);
-      for (let i = 0; i < WITHDRAWAL_RETRY_LIMIT; i++) {
-        const result = await this.l2WalletLock.withLock(() => this.executeWatchdogWithdrawal());
-        if (result === StatusNoSkip.FAIL) {
-          this.logger.warn(
-            `attempt ${i + 1} of ${WITHDRAWAL_RETRY_LIMIT} failed` +
-              (i + 1 != WITHDRAWAL_RETRY_LIMIT
-                ? `, retrying in ${(WITHDRAWAL_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
-                : "")
+      try {
+        const lastExecution = await this.getLastExecution("latest", this.wallet.address);
+        const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
+        const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
+        if (lastExecution != null) {
+          this.metricRecorder.recordPreviousExecutionStatus(
+            lastExecution.l2Receipt.status === 1 ? StatusNoSkip.OK : StatusNoSkip.FAIL
           );
-          await timeoutPromise(WITHDRAWAL_RETRY_INTERVAL);
-        } else {
-          this.logger.info(`attempt ${i + 1} succeeded`);
-          break;
         }
+        if (timeSinceLastWithdrawalSec < this.intervalMs / SEC) {
+          const waitTime = this.intervalMs - timeSinceLastWithdrawalSec * SEC;
+          this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting withdrawal flow`);
+          await timeoutPromise(waitTime);
+        }
+        while (true) {
+          const nextExecutionWait = timeoutPromise(this.intervalMs);
+          for (let i = 0; i < WITHDRAWAL_RETRY_LIMIT; i++) {
+            const result = await this.l2WalletLock.withLock(() => this.executeWatchdogWithdrawal());
+            if (result === StatusNoSkip.FAIL) {
+              this.logger.warn(
+                `attempt ${i + 1} of ${WITHDRAWAL_RETRY_LIMIT} failed` +
+                  (i + 1 != WITHDRAWAL_RETRY_LIMIT
+                    ? `, retrying in ${(WITHDRAWAL_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
+                    : "")
+              );
+              await timeoutPromise(WITHDRAWAL_RETRY_INTERVAL);
+            } else {
+              this.logger.info(`attempt ${i + 1} succeeded`);
+              break;
+            }
+          }
+          await nextExecutionWait;
+        }
+      } catch (error) {
+        this.logger.error("Error while executing withdrawal flow", error);
+        this.metricRecorder.recordFlowFailure();
+        await timeoutPromise(this.intervalMs);
       }
-      await nextExecutionWait;
     }
   }
 }

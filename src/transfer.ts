@@ -84,18 +84,23 @@ export class SimpleTxFlow extends BaseFlow {
   public async run() {
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      // Record L2 balance before each cycle
-      const l2Balance = await this.provider.getBalance(this.wallet.address);
-      recordL2BaseTokenBalance(l2Balance);
-      for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
-        const result = await this.l2WalletLock.withLock(() => this.step());
-        if (result === StatusNoSkip.OK) {
-          this.logger.info(`attempt ${i + 1} succeeded`);
-          break;
-        } else {
-          this.logger.error(`attempt ${i + 1} failed`);
+      try {
+        // Record L2 balance before each cycle
+        const l2Balance = await this.provider.getBalance(this.wallet.address);
+        recordL2BaseTokenBalance(l2Balance);
+        for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
+          const result = await this.l2WalletLock.withLock(() => this.step());
+          if (result === StatusNoSkip.OK) {
+            this.logger.info(`attempt ${i + 1} succeeded`);
+            break;
+          } else {
+            this.logger.error(`attempt ${i + 1} failed`);
+          }
+          await timeoutPromise(TRANSFER_RETRY_INTERVAL);
         }
-        await timeoutPromise(TRANSFER_RETRY_INTERVAL);
+      } catch (error) {
+        this.logger.error("Error while executing transfer flow", error);
+        this.metricRecorder.recordFlowFailure();
       }
       //sleep
       await nextExecutionWait;
