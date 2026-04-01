@@ -1,4 +1,4 @@
-FROM node:20.18.1-alpine
+FROM node:20.20.2-alpine
 
 # Create a non-root user with explicit UID/GID
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
