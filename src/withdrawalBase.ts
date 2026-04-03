@@ -61,9 +61,10 @@ function getWithdrawalLogsTopicsFilter(wallet: string | undefined) {
 export abstract class WithdrawalBaseFlow extends BaseFlow {
   constructor(
     protected wallet: Wallet,
-    flowName: string
+    flowName: string,
+    intervalMs: number
   ) {
-    super(flowName);
+    super(flowName, intervalMs);
   }
 
   protected async getLastExecution(

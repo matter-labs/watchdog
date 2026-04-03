@@ -18,22 +18,20 @@ import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
 import type { DepositParams } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
-import type { Wallet, Contract } from "ethers";
+import type { Wallet } from "ethers";
 
 const FLOW_NAME = "deposit";
 
 export class DepositFlow extends DepositBaseFlow {
+  private baseToken!: string;
+
   constructor(
     wallet: Wallet,
     client: EthersClient,
     private sdk: EthersSdk,
-    sharedBridge: Contract,
-    zkChainAddress: string,
-    chainId: bigint,
-    private baseToken: string,
-    private intervalMs: number
+    intervalMs: number
   ) {
-    super(wallet, client, sharedBridge, zkChainAddress, chainId, FLOW_NAME);
+    super(wallet, client, FLOW_NAME, intervalMs);
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -134,7 +132,13 @@ export class DepositFlow extends DepositBaseFlow {
     }
   }
 
-  public async run() {
+  protected async runAction(): Promise<void> {
+    const { bridgehub, l1AssetRouter } = await this.sdk.contracts.instances();
+    this.chainId = (await this.wallet.provider!.getNetwork()).chainId;
+    this.baseToken = await this.client.baseToken(this.chainId);
+    this.zkChainAddress = await bridgehub.getHyperchain(this.chainId);
+    this.sharedBridge = l1AssetRouter;
+
     const lastExecution = await this.getLastExecution(this.wallet.address);
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastDepositSec = currentBlockchainTimestamp - lastExecution.timestampL1;
@@ -144,6 +148,7 @@ export class DepositFlow extends DepositBaseFlow {
       this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting deposit flow`);
       await timeoutPromise(waitTime);
     }
+
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
       let attempt: number = 1;

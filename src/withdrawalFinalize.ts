@@ -4,7 +4,7 @@ import { createFinalizationServices } from "@matterlabs/zksync-js/ethers";
 import { Gauge } from "prom-client";
 
 import { Status } from "./flowMetric";
-import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
+import { SEC, MIN, unwrap } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
@@ -22,10 +22,10 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: Wallet,
     private client: EthersClient,
-    private intervalMs: number = FINALIZE_INTERVAL,
+    intervalMs: number = FINALIZE_INTERVAL,
     private receiptStore: WithdrawalReceiptStore
   ) {
-    super(wallet, FLOW_NAME);
+    super(wallet, FLOW_NAME, intervalMs);
     this.finalizationService = createFinalizationServices(this.client);
     this.metricTimeSinceLastFinalizableWithdrawal = new Gauge({
       name: "watchdog_time_since_last_finalizable_withdrawal",
@@ -89,13 +89,8 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
     }
   }
 
-  public async run() {
+  protected async runAction(): Promise<void> {
     this.logger.info(`Starting withdrawal finalize flow with interval ${this.intervalMs / MIN} minutes`);
-    while (true) {
-      const nextExecutionWait = timeoutPromise(this.intervalMs);
-
-      await this.executeWithdrawalFinalize();
-      await nextExecutionWait;
-    }
+    await this.executeWithdrawalFinalize();
   }
 }

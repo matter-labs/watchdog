@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import { BaseFlow } from "./baseFlow";
-import { SEC, timeoutPromise } from "./utils";
+import { SEC } from "./utils";
 
 import type { JsonRpcProvider } from "ethers";
 
@@ -10,34 +10,23 @@ const FLOW_NAME = "rpc_test";
 export class RpcTestFlow extends BaseFlow {
   constructor(
     private provider: JsonRpcProvider,
-    private intervalMs: number
+    intervalMs: number
   ) {
-    super(FLOW_NAME);
+    super(FLOW_NAME, intervalMs);
   }
 
-  public async run() {
-    while (true) {
-      const nextExecutionWait = timeoutPromise(this.intervalMs);
+  protected async runAction(): Promise<void> {
+    this.metricRecorder.recordFlowStart();
 
-      try {
-        this.metricRecorder.recordFlowStart();
+    await this.metricRecorder.stepExecution({
+      stepName: "get_block_number",
+      stepTimeoutMs: SEC,
+      fn: async () => {
+        const resp = await this.provider.send("eth_blockNumber", []);
+        this.logger.debug("eth_blockNumber response: " + resp);
+      },
+    });
 
-        await this.metricRecorder.stepExecution({
-          stepName: "get_block_number",
-          stepTimeoutMs: SEC,
-          fn: async () => {
-            const resp = await this.provider.send("eth_blockNumber", []);
-            this.logger.debug("eth_blockNumber response: " + resp);
-          },
-        });
-        this.metricRecorder.recordFlowSuccess();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } catch (error: any) {
-        this.logger.error("eth_blockNumber error: " + error?.message, error?.stack);
-        this.metricRecorder.recordFlowFailure();
-      }
-
-      await nextExecutionWait;
-    }
+    this.metricRecorder.recordFlowSuccess();
   }
 }

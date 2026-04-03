@@ -100,9 +100,14 @@ const main = async () => {
   };
   //
 
-  winston.info(
-    `Wallet ${l2Wallet.address} L2 balance is ${ethers.formatEther(await l2Provider.getBalance(l2Wallet.address))}`
-  );
+  l2Provider
+    .getBalance(l2Wallet.address)
+    .then((balance) => {
+      winston.info(`Wallet ${l2Wallet.address} L2 balance is ${ethers.formatEther(balance)}`);
+    })
+    .catch((err) => {
+      winston.error("Error fetching L2 balance for wallet " + l2Wallet.address, err);
+    });
   recordWalletInfo(l2Wallet.address);
 
   if (process.env.FLOW_TRANSFER_ENABLE === "1") {
@@ -116,21 +121,10 @@ const main = async () => {
   }
 
   if (process.env.FLOW_DEPOSIT_ENABLE === "1") {
-    const client = await getClient();
-    const sdk = await getSdk();
-    const { bridgehub, l1AssetRouter } = await sdk.contracts.instances();
-    const chainId = (await l2Provider.getNetwork()).chainId;
-    const baseToken = await client.baseToken(chainId);
-    const zkChainAddress = await bridgehub.getHyperchain(chainId);
-
     new DepositFlow(
       l2Wallet,
-      client,
-      sdk,
-      l1AssetRouter,
-      zkChainAddress,
-      chainId,
-      baseToken,
+      await getClient(),
+      await getSdk(),
       +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")
     ).run();
     enabledFlows++;

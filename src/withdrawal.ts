@@ -19,11 +19,11 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: Wallet,
     private l2WalletLock: Mutex,
-    private intervalMs: number,
+    intervalMs: number,
     private sdk: EthersSdk,
     private receiptStore: WithdrawalReceiptStore
   ) {
-    super(wallet, FLOW_NAME);
+    super(wallet, FLOW_NAME, intervalMs);
   }
 
   protected async executeWatchdogWithdrawal(): Promise<StatusNoSkip> {
@@ -90,7 +90,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     }
   }
 
-  public async run() {
+  protected async runAction(): Promise<void> {
     const lastExecution = await this.getLastExecution("latest", this.wallet.address);
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
