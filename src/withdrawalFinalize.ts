@@ -4,7 +4,7 @@ import { createFinalizationServices } from "@matterlabs/zksync-js/ethers";
 import { Gauge } from "prom-client";
 
 import { Status } from "./flowMetric";
-import { SEC, MIN, unwrap } from "./utils";
+import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
@@ -89,8 +89,13 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
     }
   }
 
-  protected async runAction(): Promise<void> {
+  public async run() {
     this.logger.info(`Starting withdrawal finalize flow with interval ${this.intervalMs / MIN} minutes`);
-    await this.executeWithdrawalFinalize();
+    while (true) {
+      const nextExecutionWait = timeoutPromise(this.intervalMs);
+
+      await this.executeWithdrawalFinalize();
+      await nextExecutionWait;
+    }
   }
 }

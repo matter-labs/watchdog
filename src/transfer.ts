@@ -32,6 +32,10 @@ export class SimpleTxFlow extends BaseFlow {
     try {
       this.metricRecorder.recordFlowStart();
 
+      // Record L2 balance before each cycle
+      const l2Balance = await this.provider.getBalance(this.wallet.address);
+      recordL2BaseTokenBalance(l2Balance);
+
       // populate transaction
       const tx = this.getTxRequest();
       const populated = await this.metricRecorder.stepExecution({
@@ -81,19 +85,21 @@ export class SimpleTxFlow extends BaseFlow {
     }
   }
 
-  protected async runAction(): Promise<void> {
-    // Record L2 balance before each cycle
-    const l2Balance = await this.provider.getBalance(this.wallet.address);
-    recordL2BaseTokenBalance(l2Balance);
-    for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
-      const result = await this.l2WalletLock.withLock(() => this.step());
-      if (result === StatusNoSkip.OK) {
-        this.logger.info(`attempt ${i + 1} succeeded`);
-        break;
-      } else {
-        this.logger.error(`attempt ${i + 1} failed`);
+  public async run() {
+    while (true) {
+      const nextExecutionWait = timeoutPromise(this.intervalMs);
+      for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
+        const result = await this.l2WalletLock.withLock(() => this.step());
+        if (result === StatusNoSkip.OK) {
+          this.logger.info(`attempt ${i + 1} succeeded`);
+          break;
+        } else {
+          this.logger.error(`attempt ${i + 1} failed`);
+        }
+        await timeoutPromise(TRANSFER_RETRY_INTERVAL);
       }
-      await timeoutPromise(TRANSFER_RETRY_INTERVAL);
+      //sleep
+      await nextExecutionWait;
     }
   }
 }

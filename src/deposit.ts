@@ -132,7 +132,7 @@ export class DepositFlow extends DepositBaseFlow {
     }
   }
 
-  protected async runAction(): Promise<void> {
+  protected async run(): Promise<void> {
     const { bridgehub, l1AssetRouter } = await this.sdk.contracts.instances();
     this.chainId = (await this.wallet.provider!.getNetwork()).chainId;
     this.baseToken = await this.client.baseToken(this.chainId);

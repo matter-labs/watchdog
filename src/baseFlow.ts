@@ -22,14 +22,17 @@ export abstract class BaseFlow {
     this.metricRecorder = new FlowMetricRecorder(flowName, this.logger);
   }
 
-  public async run(): Promise<void> {
+  /**
+   * Runs the flow indefinitely, restarting after a delay if an error occurs.
+   * The restart interval is limited to FLOW_CRASH_RESTART_INTERVAL to avoid long waits
+   * when intervalMs is large (e.g. for the withdrawal flow).
+   */
+  public async runWithRestart(): Promise<void> {
     // limit the retry interval to avoid too long waits in case intervalMs is large (e.g. for withdrawal flow)
     const retryInterval = Math.min(this.intervalMs, FLOW_CRASH_RESTART_INTERVAL);
     while (true) {
-      const nextRun = timeoutPromise(this.intervalMs);
       try {
-        await this.runAction();
-        await nextRun;
+        await this.run();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         this.logger.error(
@@ -37,10 +40,10 @@ export abstract class BaseFlow {
           error?.stack
         );
         this.metricRecorder.recordFlowFailure();
-        await timeoutPromise(retryInterval);
       }
+      await timeoutPromise(retryInterval);
     }
   }
 
-  protected abstract runAction(): Promise<void>;
+  protected abstract run(): Promise<void>;
 }

@@ -58,7 +58,13 @@ const main = async () => {
 
     // Prividium flow (refreshes auth token and records metrics)
     const prividiumIntervalMs = +(process.env.FLOW_PRIVIDIUM_INTERVAL ?? SEC);
-    new PrividiumFlow(siweSigner, prividiumDomain, prividiumApiUrl, prividiumIntervalMs, prividiumTokenStore).run();
+    new PrividiumFlow(
+      siweSigner,
+      prividiumDomain,
+      prividiumApiUrl,
+      prividiumIntervalMs,
+      prividiumTokenStore
+    ).runWithRestart();
     enabledFlows++;
   }
 
@@ -84,17 +90,17 @@ const main = async () => {
   };
 
   let _client: EthersClient | undefined;
-  const getClient = async () => {
+  const getClient = () => {
     if (!_client) {
-      _client = await createEthersClient({ l1: getL1Provider(), l2: l2Provider, signer: l2Wallet });
+      _client = createEthersClient({ l1: getL1Provider(), l2: l2Provider, signer: l2Wallet });
     }
     return _client;
   };
 
   let _sdk: EthersSdk | undefined;
-  const getSdk = async () => {
+  const getSdk = () => {
     if (!_sdk) {
-      _sdk = createEthersSdk(await getClient());
+      _sdk = createEthersSdk(getClient());
     }
     return _sdk;
   };
@@ -116,17 +122,17 @@ const main = async () => {
       l2WalletLock,
       l2Provider,
       +unwrap(process.env.FLOW_TRANSFER_INTERVAL, "FLOW_TRANSFER_INTERVAL")
-    ).run();
+    ).runWithRestart();
     enabledFlows++;
   }
 
   if (process.env.FLOW_DEPOSIT_ENABLE === "1") {
     new DepositFlow(
       l2Wallet,
-      await getClient(),
-      await getSdk(),
+      getClient(),
+      getSdk(),
       +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")
-    ).run();
+    ).runWithRestart();
     enabledFlows++;
   }
 
@@ -137,33 +143,33 @@ const main = async () => {
       l2Wallet,
       l2WalletLock,
       +unwrap(process.env.FLOW_WITHDRAWAL_INTERVAL, "FLOW_WITHDRAWAL_INTERVAL"),
-      await getSdk(),
+      getSdk(),
       withdrawalReceiptStore
-    ).run();
+    ).runWithRestart();
     enabledFlows++;
   }
 
   if (process.env.FLOW_WITHDRAWAL_FINALIZE_ENABLE === "1") {
     new WithdrawalFinalizeFlow(
       l2Wallet,
-      await getClient(),
+      getClient(),
       +unwrap(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL, "FLOW_WITHDRAWAL_FINALIZE_INTERVAL"),
       withdrawalReceiptStore
-    ).run();
+    ).runWithRestart();
     enabledFlows++;
   }
 
   // RPC Test flow (eth_blockNumber)
   if (process.env.FLOW_RPC_TEST_ENABLE !== "0") {
     const rpcTestIntervalMs = +(process.env.FLOW_RPC_TEST_INTERVAL ?? SEC);
-    new RpcTestFlow(l2Provider, rpcTestIntervalMs).run();
+    new RpcTestFlow(l2Provider, rpcTestIntervalMs).runWithRestart();
     enabledFlows++;
   }
 
   // Settlement flow
   if (process.env.FLOW_SETTLEMENT_ENABLE === "1") {
     const settlementIntervalMs = +(process.env.FLOW_SETTLEMENT_INTERVAL ?? SEC);
-    new SettlementFlow(l2Provider, getL1Provider(), settlementIntervalMs, SETTLEMENT_DEADLINE).run();
+    new SettlementFlow(l2Provider, getL1Provider(), settlementIntervalMs, SETTLEMENT_DEADLINE).runWithRestart();
     enabledFlows++;
   }
 

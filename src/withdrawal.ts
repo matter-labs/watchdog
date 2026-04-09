@@ -90,7 +90,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     }
   }
 
-  protected async runAction(): Promise<void> {
+  protected async run(): Promise<void> {
     const lastExecution = await this.getLastExecution("latest", this.wallet.address);
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
