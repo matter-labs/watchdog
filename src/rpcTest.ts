@@ -10,9 +10,9 @@ const FLOW_NAME = "rpc_test";
 export class RpcTestFlow extends BaseFlow {
   constructor(
     private provider: JsonRpcProvider,
-    private intervalMs: number
+    intervalMs: number
   ) {
-    super(FLOW_NAME);
+    super(FLOW_NAME, intervalMs);
   }
 
   public async run() {

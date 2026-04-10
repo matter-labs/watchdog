@@ -12,10 +12,10 @@ export class PrividiumFlow extends BaseFlow {
     private signer: Signer,
     private domain: string,
     private apiUrl: string,
-    private intervalMs: number,
+    intervalMs: number,
     private tokenStore: PrividiumTokenStore
   ) {
-    super(FLOW_NAME);
+    super(FLOW_NAME, intervalMs);
   }
 
   public async run() {

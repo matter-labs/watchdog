@@ -15,10 +15,10 @@ export class SettlementFlow extends BaseFlow {
   constructor(
     private l2Provider: Provider,
     private l1Provider: Provider,
-    private intervalMs: number,
+    intervalMs: number,
     private settlementDeadline: number
   ) {
-    super(FLOW_NAME);
+    super(FLOW_NAME, intervalMs);
     this.metricSettlementAge = new Gauge({
       name: "watchdog_settlement_age",
       help: "Age of the oldest unsettled block in seconds (0 if no unsettled blocks)",

@@ -16,9 +16,9 @@ export class SimpleTxFlow extends BaseFlow {
     private wallet: Wallet,
     private l2WalletLock: Mutex,
     private provider: Provider,
-    private intervalMs: number
+    intervalMs: number
   ) {
-    super(FLOW_NAME);
+    super(FLOW_NAME, intervalMs);
   }
 
   protected getTxRequest(): TransactionRequest {
@@ -31,6 +31,10 @@ export class SimpleTxFlow extends BaseFlow {
   protected async step(): Promise<StatusNoSkip> {
     try {
       this.metricRecorder.recordFlowStart();
+
+      // Record L2 balance before each cycle
+      const l2Balance = await this.provider.getBalance(this.wallet.address);
+      recordL2BaseTokenBalance(l2Balance);
 
       // populate transaction
       const tx = this.getTxRequest();
@@ -84,9 +88,6 @@ export class SimpleTxFlow extends BaseFlow {
   public async run() {
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      // Record L2 balance before each cycle
-      const l2Balance = await this.provider.getBalance(this.wallet.address);
-      recordL2BaseTokenBalance(l2Balance);
       for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
         const result = await this.l2WalletLock.withLock(() => this.step());
         if (result === StatusNoSkip.OK) {

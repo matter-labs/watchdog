@@ -41,7 +41,7 @@ FLOW_DEPOSIT_ENABLE=1
 FLOW_WITHDRAWAL_ENABLE=1
 FLOW_WITHDRAWAL_FINALIZE_ENABLE=1
 FLOW_WITHDRAWAL_INTERVAL=60000
-FLOW_PRIVIDIUM_ENABLE=1  # Only for ZKOS mode
+FLOW_PRIVIDIUM_ENABLE=1
 ```
 
 Install dependencies and start
@@ -70,6 +70,7 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `L2_POLLING_INTERVAL`: L2 provider polling interval in ms (default: `100`)
 - `L1_POLLING_INTERVAL`: L1 provider polling interval in ms (default: ethers.js default, currenly 4 sec)
 - `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 15 seconds)
+- `FLOW_CRASH_RESTART_INTERVAL`: How long to wait before restarting a flow after an unexpected error in ms (default: `10000`). The actual restart delay is `min(FLOW_CRASH_RESTART_INTERVAL, <flow interval>)` to avoid unnecessarily long waits for flows with large intervals (e.g. withdrawal).
 
 ### Flow-specific options
 See below for detailed flow configuration.
