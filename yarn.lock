@@ -174,10 +174,10 @@
   resolved "https://registry.yarnpkg.com/@matterlabs/prettier-config/-/prettier-config-1.0.3.tgz#3e2eb559c0112bbe9671895f935700dad2a15d38"
   integrity sha512-JW7nHREPqEtjBWz3EfxLarkmJBD8vi7Kx/1AQ6eBZnz12eHc1VkOyrc6mpR5ogTf0dOUNXFAfZut+cDe2dn4kQ==
 
-"@matterlabs/zksync-js@^0.0.16":
-  version "0.0.16"
-  resolved "https://registry.yarnpkg.com/@matterlabs/zksync-js/-/zksync-js-0.0.16.tgz#0b100769249b193d88ff55d2264656482cb1e045"
-  integrity sha512-PAAUW/VoFvz7hCFtk8SXS8vFKPHjhiAdS0dT9cBkDR3LPhEm4xCWC9xrOClwWMhC13gsoxJEjwoHJ9BpJ2Cm3g==
+"@matterlabs/zksync-js@^0.0.17":
+  version "0.0.17"
+  resolved "https://registry.yarnpkg.com/@matterlabs/zksync-js/-/zksync-js-0.0.17.tgz#9a8a80cb843bfd7e1a7b3e6f019c39664c175dd1"
+  integrity sha512-fZckXoxO56u6pwdHXuDTUgYddFgyoKdjDmqhjUStDyJ3uk5vzkDTxubcREo5RvLLhbwq9XqKxog9QXr/qsXOQw==
   dependencies:
     "@noble/hashes" "^1.8.0"
 
