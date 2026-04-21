@@ -17,7 +17,7 @@ minimum, while keeping all other fee selection behavior unchanged.
 
 Add a small helper in watchdog code that:
 
-- reads `FLOW_DEPOSIT_MIN_PRIORITY_FEE_GWEI` from the environment
+- reads `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` from the environment
 - converts the configured gwei value to wei
 - asks the L1 provider for `getFeeData().maxPriorityFeePerGas`
 - returns the larger of the provider value and the configured minimum
