@@ -105,7 +105,10 @@ Options:
 - `FLOW_DEPOSIT_RETRY_INTERVAL` -- retry interval in ms (default to 5 minutes)
 - `FLOW_DEPOSIT_RETRY_LIMIT` -- retry limit (default to 3)
 - `FLOW_DEPOSIT_L2_TIMEOUT` -- timeout of l2 deposit confirmation in ms
-- `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI` -- gas price limit in gwei for l1 deposit transaction. If its exceeded in **estimation** the flow will skip
+- `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI` -- gas price limit in gwei for l1 deposit transaction.
+  If its exceeded in **estimation** the flow will skip
+- `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` -- minimum L1 `maxPriorityFeePerGas` to use for
+  watchdog deposit transactions (default: `0.001`)
 - `MAX_LOGS_BLOCKS` -- max number of blocks in range of `eth_getLogs` request
 
 ### Deposit User
@@ -114,8 +117,11 @@ Observes onchain deposit transactions and performs deposit if none detected or i
 
 Options:
 - `FLOW_DEPOSIT_USER_INTERVAL` -- interval in ms (frequency of quaring latest deposit)
-- `FLOW_DEPOSIT_USER_TX_TRIGGER_DELAY` -- max age of user transaction to consider. If exceeded watchdog will trigger deposit transaction from watchdog wallet
-- `FLOW_DEPOSIT_L2_TIMEOUT`, `MAX_LOGS_BLOCKS`, `FLOW_DEPOSIT_RETRY_INTERVAL`, `FLOW_DEPOSIT_RETRY_LIMIT`, `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI` shared with deposit flow
+- `FLOW_DEPOSIT_USER_TX_TRIGGER_DELAY` -- max age of user transaction to consider. If exceeded
+  watchdog will trigger deposit transaction from watchdog wallet
+- `FLOW_DEPOSIT_L2_TIMEOUT`, `MAX_LOGS_BLOCKS`, `FLOW_DEPOSIT_RETRY_INTERVAL`,
+  `FLOW_DEPOSIT_RETRY_LIMIT`, `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI`,
+  `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` shared with deposit flow
 
 ### Withdrawal
 
