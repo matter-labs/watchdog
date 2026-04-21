@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
 import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
-import { formatEther, MaxInt256, parseEther } from "ethers";
+import { formatEther, MaxInt256, parseEther, parseUnits } from "ethers";
 
 import {
   DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI,
@@ -13,7 +13,6 @@ import {
   STEPS,
   getErc20Contract,
 } from "./depositBase";
-import { resolveDepositPriorityFeeFloor } from "./depositPriorityFee";
 import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
@@ -22,6 +21,8 @@ import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
 import type { Wallet } from "ethers";
 
 const FLOW_NAME = "deposit";
+const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
+const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
 
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
@@ -35,17 +36,16 @@ export class DepositFlow extends DepositBaseFlow {
     super(wallet, client, FLOW_NAME, intervalMs);
   }
 
-  private async getDepositParams(): Promise<DepositParams> {
-    return {
-      to: this.wallet.address,
-      token: this.baseToken,
-      amount: 1n, // just 1 wei
-      refundRecipient: this.wallet.address,
-      l1TxOverrides: {
-        nonce: "latest",
-        maxPriorityFeePerGas: await resolveDepositPriorityFeeFloor(this.client.l1),
-      },
-    } as DepositParams;
+  private async getMinPriorityFeePerGas(): Promise<bigint> {
+    const configuredValue = process.env[MIN_PRIORITY_FEE_ENV] ?? DEFAULT_MIN_PRIORITY_FEE_GWEI;
+    const configuredMin = parseUnits(configuredValue, "gwei");
+    const providerTip = (await this.client.l1.getFeeData()).maxPriorityFeePerGas;
+
+    if (providerTip == null || providerTip < configuredMin) {
+      return configuredMin;
+    }
+
+    return providerTip;
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -78,7 +78,16 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.estimation,
         stepTimeoutMs: 30 * SEC,
         fn: async ({ recordStepGas, recordStepGasCost, recordStepGasPrice }) => {
-          const params = await this.getDepositParams();
+          const params = {
+            to: this.wallet.address,
+            token: this.baseToken,
+            amount: 1n, // just 1 wei
+            refundRecipient: this.wallet.address,
+            l1TxOverrides: {
+              nonce: "latest",
+              maxPriorityFeePerGas: await this.getMinPriorityFeePerGas(),
+            },
+          } as DepositParams;
           const depositQuote = await this.sdk.deposits.quote(params);
           recordStepGas(depositQuote.fees.l1!.gasLimit);
           recordStepGasPrice(depositQuote.fees.l1!.maxFeePerGas);
@@ -103,7 +112,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const depositHandle = await this.sdk.deposits.create(await this.getDepositParams());
+          const depositHandle = await this.sdk.deposits.create(deposit.params);
           const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));
