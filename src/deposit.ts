@@ -13,6 +13,7 @@ import {
   STEPS,
   getErc20Contract,
 } from "./depositBase";
+import { resolveDepositPriorityFeeFloor } from "./depositPriorityFee";
 import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
@@ -32,6 +33,19 @@ export class DepositFlow extends DepositBaseFlow {
     intervalMs: number
   ) {
     super(wallet, client, FLOW_NAME, intervalMs);
+  }
+
+  private async getDepositParams(): Promise<DepositParams> {
+    return {
+      to: this.wallet.address,
+      token: this.baseToken,
+      amount: 1n, // just 1 wei
+      refundRecipient: this.wallet.address,
+      l1TxOverrides: {
+        nonce: "latest",
+        maxPriorityFeePerGas: await resolveDepositPriorityFeeFloor(this.client.l1),
+      },
+    } as DepositParams;
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -64,13 +78,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.estimation,
         stepTimeoutMs: 30 * SEC,
         fn: async ({ recordStepGas, recordStepGasCost, recordStepGasPrice }) => {
-          const params = {
-            to: this.wallet.address,
-            token: this.baseToken,
-            amount: 1n, // just 1 wei
-            refundRecipient: this.wallet.address,
-            l1TxOverrides: { nonce: "latest" },
-          } as DepositParams;
+          const params = await this.getDepositParams();
           const depositQuote = await this.sdk.deposits.quote(params);
           recordStepGas(depositQuote.fees.l1!.gasLimit);
           recordStepGasPrice(depositQuote.fees.l1!.maxFeePerGas);
@@ -95,7 +103,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const depositHandle = await this.sdk.deposits.create(deposit.params);
+          const depositHandle = await this.sdk.deposits.create(await this.getDepositParams());
           const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));

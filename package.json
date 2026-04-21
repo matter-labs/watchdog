@@ -9,6 +9,7 @@
   "prettier": "@matterlabs/prettier-config",
   "scripts": {
     "build": "tsc",
+    "test": "node --require ts-node/register --test",
     "typecheck": "tsc -p . --noEmit",
     "lint": "eslint src --fix --max-warnings=0",
     "lint:check": "eslint src --max-warnings=0",
