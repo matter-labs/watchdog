@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: watchdog
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: watchdog-lease
+  namespace: default
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: watchdog-lease
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: watchdog
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: watchdog-lease
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watchdog
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: watchdog
+  template:
+    metadata:
+      labels:
+        app: watchdog
+    spec:
+      serviceAccountName: watchdog
+      containers:
+        - name: watchdog
+          image: your-registry/watchdog:latest
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LEASE_NAME
+              value: app-singleton

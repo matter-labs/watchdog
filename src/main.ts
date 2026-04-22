@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { createEthersClient, createEthersSdk } from "@matterlabs/zksync-js/ethers";
 import { ethers, Wallet as EthersWallet, JsonRpcProvider } from "ethers";
 import express from "express";
@@ -9,7 +8,6 @@ import { SETTLEMENT_DEADLINE } from "./configs";
 import { DepositFlow } from "./deposit";
 import { recordWalletInfo } from "./flowMetric";
 import { Mutex } from "./lock";
-import { setupLogger } from "./logger";
 import { PrividiumFlow } from "./prividium";
 import { runSiweFlow } from "./prividiumAuth";
 import { LoggingJsonRpcProvider } from "./rpcLoggingProvider";
@@ -33,8 +31,25 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
   };
 }
 
-const main = async () => {
-  setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
+function startMetricsServer(): void {
+  collectDefaultMetrics();
+
+  const app = express();
+
+  app.get("/metrics", async (_req, res) => {
+    try {
+      res.set("Content-Type", register.contentType);
+      res.end(await register.metrics());
+    } catch (error) {
+      res.status(500).end(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  app.listen(+(process.env.METRICS_PORT ?? 8080), "0.0.0.0");
+}
+
+export const runWatchdog = async (): Promise<void> => {
+  startMetricsServer();
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
   const wallet = new EthersWallet(unwrap(process.env.WALLET_KEY, "WALLET_KEY"));
   const l2Provider = new LoggingJsonRpcProvider(
@@ -179,23 +194,3 @@ const main = async () => {
     process.exit(1);
   }
 };
-
-collectDefaultMetrics();
-
-const app = express();
-
-app.get("/metrics", async (_req, res) => {
-  try {
-    res.set("Content-Type", register.contentType);
-    res.end(await register.metrics());
-  } catch (err) {
-    res.status(500).end(err);
-  }
-});
-
-app.listen(+(process.env.METRICS_PORT ?? 8080), "0.0.0.0");
-
-main().catch((err) => {
-  winston.error("Fatal startup error", err);
-  process.exit(1);
-});

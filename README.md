@@ -1,3 +1,7 @@
+> Kubernetes Lease is not a fencing mechanism.
+> This approach reduces failover time, but does not guarantee perfect single-writer safety
+> during all failure modes.
+
 # ZKsync OS Watchdog
 
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue)](https://github.com/matter-labs/zksync-wallet-vue/blob/master/LICENSE-MIT)
@@ -55,6 +59,23 @@ Or, to use Docker:
 docker build -t zksync-os-watchdog .
 docker run --env-file .env zksync-os-watchdog
 ```
+
+### High Availability
+
+This service can run with multiple Kubernetes replicas while allowing only one active instance.
+On startup the process connects to the in-cluster Kubernetes API, waits until it acquires a
+`coordination.k8s.io/v1` Lease, then starts the watchdog flows. Once leader, it renews the Lease
+every 30 seconds. If renewal fails, conflicts, or the Lease is no longer held by the current pod,
+the process exits with status `1`.
+
+Lease environment variables:
+
+- `LEASE_NAME`: Lease name (default: `app-singleton`)
+- `POD_NAMESPACE`: Lease namespace (default: `default`)
+- `POD_NAME`: Preferred holder identity
+- `HOSTNAME`: Fallback holder identity when `POD_NAME` is not set
+
+Example Kubernetes RBAC and deployment wiring live in [k8s/rbac.yaml](k8s/rbac.yaml).
 
 ## Configuration
 
