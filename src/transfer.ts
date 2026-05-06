@@ -4,8 +4,8 @@ import { L2_EXECUTION_TIMEOUT } from "./configs";
 import { recordL2BaseTokenBalance, StatusNoSkip } from "./flowMetric";
 import { SEC, timeoutPromise, unwrap } from "./utils";
 
-import type { WatchdogSigner } from "./wallet";
 import type { Mutex } from "./lock";
+import type { WatchdogSigner } from "./wallet";
 import type { Provider, TransactionRequest } from "ethers";
 
 const FLOW_NAME = "transfer";

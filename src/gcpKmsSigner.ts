@@ -69,9 +69,7 @@ export class GcpKmsSigner extends AbstractSigner {
       throw new Error("GCP KMS did not return a PEM public key");
     }
     if (publicKey.algorithm !== "EC_SIGN_SECP256K1_SHA256") {
-      throw new Error(
-        `GCP KMS key algorithm must be EC_SIGN_SECP256K1_SHA256, got ${publicKey.algorithm}`
-      );
+      throw new Error(`GCP KMS key algorithm must be EC_SIGN_SECP256K1_SHA256, got ${publicKey.algorithm}`);
     }
 
     const uncompressedPubKey = pemToUncompressedPublicKey(publicKey.pem);
