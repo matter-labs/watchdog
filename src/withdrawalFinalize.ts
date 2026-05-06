@@ -7,9 +7,9 @@ import { Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
+import type { WatchdogSigner } from "./wallet";
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
-import type { Wallet } from "ethers";
 
 const FLOW_NAME = "withdrawalFinalize";
 const FINALIZE_INTERVAL = +(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL ?? 15 * MIN);
@@ -20,7 +20,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   private finalizationService;
 
   constructor(
-    wallet: Wallet,
+    wallet: WatchdogSigner,
     private client: EthersClient,
     intervalMs: number = FINALIZE_INTERVAL,
     private receiptStore: WithdrawalReceiptStore

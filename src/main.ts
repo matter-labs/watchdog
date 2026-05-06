@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createEthersClient, createEthersSdk } from "@matterlabs/zksync-js/ethers";
-import { ethers, Wallet as EthersWallet, JsonRpcProvider } from "ethers";
+import { ethers, JsonRpcProvider } from "ethers";
 import express from "express";
 import { collectDefaultMetrics, register } from "prom-client";
 import winston from "winston";
@@ -17,6 +17,7 @@ import { RpcTestFlow } from "./rpcTest";
 import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
 import { SEC, unwrap } from "./utils";
+import { createWallet } from "./wallet";
 import { WithdrawalFlow } from "./withdrawal";
 import { WithdrawalReceiptStore } from "./withdrawalBase";
 import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
@@ -36,7 +37,8 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
 const main = async () => {
   setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
-  const wallet = new EthersWallet(unwrap(process.env.WALLET_KEY, "WALLET_KEY"));
+  const walletKey = unwrap(process.env.WALLET_KEY, "WALLET_KEY");
+  const wallet = await createWallet(walletKey);
   const l2Provider = new LoggingJsonRpcProvider(
     wallet.address,
     unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"),
@@ -50,7 +52,7 @@ const main = async () => {
   if (process.env.FLOW_PRIVIDIUM_ENABLE === "1") {
     const prividiumApiUrl = unwrap(process.env.FLOW_PRIVIDIUM_API_URL);
     const prividiumDomain = unwrap(process.env.FLOW_PRIVIDIUM_DOMAIN);
-    const siweSigner = new EthersWallet(unwrap(process.env.WALLET_KEY));
+    const siweSigner = await createWallet(walletKey);
     const prividiumTokenStore: PrividiumTokenStore = { token: null };
 
     await runSiweFlow(siweSigner, prividiumApiUrl, prividiumDomain, prividiumTokenStore);
@@ -68,7 +70,7 @@ const main = async () => {
     enabledFlows++;
   }
 
-  const l2Wallet = wallet.connect(l2Provider);
+  const l2Wallet = wallet.connect(l2Provider) as typeof wallet;
   const l2WalletLock = new Mutex();
 
   // Lazy initialization of L1 provider, zkSync client and SDK, as they are only needed for some flows

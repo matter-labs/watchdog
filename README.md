@@ -30,7 +30,7 @@ Maintaining a healthy chain is critical, including during periods of low activit
 Configure `.env` file with at least following options:
 
 ```env
-WALLET_KEY=0xdeadbeef  # Wallet key to use
+WALLET_KEY=0xdeadbeef  # Hex private key, OR a GCP KMS resource name (see below)
 CHAIN_RPC_URL=http://127.0.0.1:3052 # l2 json-rpc endpoint
 PAYMASTER_ADDRESS=0x111C3E89Ce80e62EE88318C2804920D4c96f92bb  # if using paymaster for transactions
 METRICS_PORT=8090  # Override to avoid collisions with zkstack server
@@ -63,7 +63,7 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `NODE_ENV`: `production` or `dev` (default: `dev`)
 - `LOG_LEVEL`: Logging verbosity
 - `CHAIN_RPC_URL`: L2 JSON-RPC endpoint
-- `WALLET_KEY`: Watchdog wallet key (`0x`-prefixed hex string)
+- `WALLET_KEY`: Watchdog wallet key — either a `0x`-prefixed hex private key **or** a GCP KMS resource name (see [GCP KMS Signing](#gcp-kms-signing) below)
 - `PAYMASTER_ADDRESS`: (optional) Use paymaster for L2 transactions
 - `METRICS_PORT`: Prometheus metrics port (default: `8080`)
 - `CHAIN_L1_RPC_URL`: L1 JSON-RPC endpoint
@@ -197,6 +197,24 @@ function permissions:
 Contract: `Base Token` (`0x000000000000000000000000000000000000800A`),
 event permissions:
 * `Withdrawal`: topic1: `User Addr` topic2: `User Addr`
+
+---
+
+## GCP KMS Signing
+
+Instead of providing a hex private key, you can set `WALLET_KEY` to a GCP Cloud KMS
+CryptoKeyVersion resource name:
+
+```env
+WALLET_KEY=projects/my-project/locations/global/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1
+```
+
+Requirements:
+- The KMS key **must** use the `EC_SIGN_SECP256K1_SHA256` algorithm (the secp256k1 curve used by Ethereum).
+- Authentication uses [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials). In GKE this is typically provided via Workload Identity Federation — no explicit service account key file is needed.
+- The service account must have the `roles/cloudkms.signerVerifier` role (or equivalent permissions: `cloudkms.cryptoKeyVersions.useToSign` and `cloudkms.cryptoKeyVersions.viewPublicKey`).
+
+The watchdog auto-detects the format: if `WALLET_KEY` starts with `projects/`, GCP KMS signing is used; otherwise it is treated as a hex private key.
 
 ---
 

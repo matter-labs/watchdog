@@ -7,17 +7,17 @@ import { StatusNoSkip } from "./flowMetric";
 import { SEC, unwrap, timeoutPromise } from "./utils";
 import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
+import type { WatchdogSigner } from "./wallet";
 import type { Mutex } from "./lock";
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawParams } from "@matterlabs/zksync-js/core";
 import type { EthersSdk } from "@matterlabs/zksync-js/ethers/sdk";
-import type { Wallet } from "ethers";
 
 const FLOW_NAME = "withdrawal";
 
 export class WithdrawalFlow extends WithdrawalBaseFlow {
   constructor(
-    wallet: Wallet,
+    wallet: WatchdogSigner,
     private l2WalletLock: Mutex,
     intervalMs: number,
     private sdk: EthersSdk,
