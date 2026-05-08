@@ -1,7 +1,6 @@
-import { createPublicKey } from "node:crypto";
-
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import { secp256k1 } from "@noble/curves/secp256k1";
+import { createPublicKey } from "crypto";
 import {
   AbstractSigner,
   computeAddress,
