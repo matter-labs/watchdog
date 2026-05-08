@@ -5,7 +5,8 @@ import { recordL2BaseTokenBalance, StatusNoSkip } from "./flowMetric";
 import { SEC, timeoutPromise, unwrap } from "./utils";
 
 import type { Mutex } from "./lock";
-import type { Provider, Wallet, TransactionRequest } from "ethers";
+import type { WatchdogSigner } from "./wallet";
+import type { Provider, TransactionRequest } from "ethers";
 
 const FLOW_NAME = "transfer";
 const TRANSFER_RETRY_LIMIT = +(process.env.FLOW_TRANSFER_RETRY_LIMIT ?? 5);
@@ -13,7 +14,7 @@ const TRANSFER_RETRY_INTERVAL = +(process.env.FLOW_TRANSFER_RETRY_INTERVAL ?? 5 
 
 export class SimpleTxFlow extends BaseFlow {
   constructor(
-    private wallet: Wallet,
+    private wallet: WatchdogSigner,
     private l2WalletLock: Mutex,
     private provider: Provider,
     intervalMs: number

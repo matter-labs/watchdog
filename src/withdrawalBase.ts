@@ -5,7 +5,8 @@ import { getAddress, id, zeroPadValue } from "ethers";
 import { BaseFlow } from "./baseFlow";
 import { SEC, unwrap } from "./utils";
 
-import type { TransactionReceipt, Wallet } from "ethers";
+import type { WatchdogSigner } from "./wallet";
+import type { TransactionReceipt } from "ethers";
 
 export type ExecutionResultUnknown = null;
 export type ExecutionResultKnown = {
@@ -60,7 +61,7 @@ function getWithdrawalLogsTopicsFilter(wallet: string | undefined) {
 
 export abstract class WithdrawalBaseFlow extends BaseFlow {
   constructor(
-    protected wallet: Wallet,
+    protected wallet: WatchdogSigner,
     flowName: string,
     intervalMs: number
   ) {

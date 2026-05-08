@@ -16,9 +16,9 @@ import {
 import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
+import type { WatchdogSigner } from "./wallet";
 import type { DepositParams } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
-import type { Wallet } from "ethers";
 
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
@@ -28,7 +28,7 @@ export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
 
   constructor(
-    wallet: Wallet,
+    wallet: WatchdogSigner,
     client: EthersClient,
     private sdk: EthersSdk,
     intervalMs: number

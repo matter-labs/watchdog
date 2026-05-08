@@ -6,8 +6,9 @@ import { BaseFlow } from "./baseFlow";
 import { StatusNoSkip } from "./flowMetric";
 import { MIN, SEC, unwrap } from "./utils";
 
+import type { WatchdogSigner } from "./wallet";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
-import type { TransactionReceipt, Provider, Wallet, Signer } from "ethers";
+import type { TransactionReceipt, Provider, Signer } from "ethers";
 
 const erc20ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -54,7 +55,7 @@ export abstract class DepositBaseFlow extends BaseFlow {
   protected chainId!: bigint;
 
   constructor(
-    protected wallet: Wallet,
+    protected wallet: WatchdogSigner,
     protected client: EthersClient,
     flowName: string,
     intervalMs: number

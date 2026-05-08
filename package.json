@@ -32,6 +32,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@google-cloud/kms": "^4.5.0",
     "@matterlabs/zksync-js": "^0.0.17",
     "dotenv": "^16.4.5",
     "ethers": "^6.16.0",
