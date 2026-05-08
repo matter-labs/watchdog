@@ -3,13 +3,13 @@ import winston from "winston";
 
 import { GcpKmsSigner } from "./gcpKmsSigner";
 
-import type { AbstractSigner, Provider } from "ethers";
+import type { Provider } from "ethers";
 
 /**
  * Union type for signers used throughout the watchdog.
  * Both branches expose an `address` property and the full AbstractSigner API.
  */
-export type WatchdogSigner = (EthersWallet | GcpKmsSigner) & AbstractSigner & { address: string };
+export type WatchdogSigner = EthersWallet | GcpKmsSigner;
 
 /** Returns true when the key looks like a GCP KMS resource name. */
 export function isGcpKmsKey(key: string): boolean {
@@ -33,10 +33,10 @@ export async function createWallet(key: string, provider?: Provider | null): Pro
   if (isGcpKmsKey(key)) {
     winston.info("WALLET_KEY is a GCP KMS resource name — using KMS signer");
     const signer = await GcpKmsSigner.create(key, provider);
-    return signer as WatchdogSigner;
+    return signer;
   }
 
   winston.info("WALLET_KEY is a hex private key — using local wallet");
   const wallet = provider ? new EthersWallet(key, provider) : new EthersWallet(key);
-  return wallet as WatchdogSigner;
+  return wallet;
 }

@@ -1,4 +1,7 @@
+import { createPublicKey } from "node:crypto";
+
 import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { secp256k1 } from "@noble/curves/secp256k1";
 import {
   AbstractSigner,
   computeAddress,
@@ -124,9 +127,11 @@ export class GcpKmsSigner extends AbstractSigner {
    * with the recovery parameter `v` resolved.
    */
   private async kmsSign(digest: Uint8Array): Promise<Signature> {
+    // Pass the pre-computed digest via `digest.sha256` so KMS signs it
+    // directly without applying an additional SHA-256 round.
     const [response] = await this.kmsClient.asymmetricSign({
       name: this.keyVersionName,
-      data: digest,
+      digest: { sha256: digest },
     });
 
     if (!response.signature) {
@@ -138,16 +143,12 @@ export class GcpKmsSigner extends AbstractSigner {
         ? response.signature
         : new Uint8Array(Buffer.from(response.signature as string, "base64"));
 
-    const { r, s } = parseDerSignature(sigBytes);
+    // fromDER parses the DER-encoded signature; normalizeS enforces low-S (EIP-2)
+    const { r, s } = secp256k1.Signature.fromDER(sigBytes).normalizeS();
 
-    // secp256k1 order — needed to normalise `s` to low-S form (EIP-2)
-    const secp256k1N = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
-    const sNorm = s > secp256k1N / 2n ? secp256k1N - s : s;
-
-    // Determine recovery parameter by trying both values
     const digestHex = "0x" + Buffer.from(digest).toString("hex");
     const rHex = "0x" + r.toString(16).padStart(64, "0");
-    const sHex = "0x" + sNorm.toString(16).padStart(64, "0");
+    const sHex = "0x" + s.toString(16).padStart(64, "0");
 
     for (const v of [27, 28]) {
       const candidate = Signature.from({ r: rHex, s: sHex, v });
@@ -184,108 +185,12 @@ class ConnectedGcpKmsSigner extends GcpKmsSigner {
 }
 
 /* ------------------------------------------------------------------ */
-/*  DER / PEM utilities                                                */
+/*  PEM utility                                                        */
 /* ------------------------------------------------------------------ */
 
-/**
- * Extract the uncompressed secp256k1 public key (0x04 || x || y, 65 bytes)
- * from a PEM-encoded SubjectPublicKeyInfo structure returned by GCP KMS.
- */
 function pemToUncompressedPublicKey(pem: string): string {
-  const base64 = pem
-    .replace(/-----BEGIN PUBLIC KEY-----/, "")
-    .replace(/-----END PUBLIC KEY-----/, "")
-    .replace(/\s+/g, "");
-  const der = Buffer.from(base64, "base64");
-
-  // The DER-encoded SubjectPublicKeyInfo for secp256k1 contains a 65-byte
-  // uncompressed point (0x04 prefix) at the very end.
-  // Walk through ASN.1 to find the BIT STRING payload.
-  const pubKeyBytes = extractBitStringPayload(der);
-  if (pubKeyBytes.length !== 65 || pubKeyBytes[0] !== 0x04) {
-    throw new Error(`Unexpected public key format from KMS (length=${pubKeyBytes.length})`);
-  }
-  return "0x" + Buffer.from(pubKeyBytes).toString("hex");
-}
-
-/**
- * Parse a DER-encoded ECDSA signature and return (r, s) as bigints.
- *
- * DER layout:
- *   SEQUENCE { INTEGER r, INTEGER s }
- *   30 <len> 02 <rLen> <r…> 02 <sLen> <s…>
- */
-function parseDerSignature(der: Uint8Array): { r: bigint; s: bigint } {
-  let offset = 0;
-
-  // SEQUENCE tag
-  if (der[offset++] !== 0x30) throw new Error("DER: expected SEQUENCE tag");
-  offset += derReadLengthBytes(der, offset);
-
-  // INTEGER r
-  if (der[offset++] !== 0x02) throw new Error("DER: expected INTEGER tag for r");
-  const rLen = der[offset++];
-  const rBytes = der.slice(offset, offset + rLen);
-  offset += rLen;
-
-  // INTEGER s
-  if (der[offset++] !== 0x02) throw new Error("DER: expected INTEGER tag for s");
-  const sLen = der[offset++];
-  const sBytes = der.slice(offset, offset + sLen);
-
-  return {
-    r: BigInt("0x" + Buffer.from(rBytes).toString("hex")),
-    s: BigInt("0x" + Buffer.from(sBytes).toString("hex")),
-  };
-}
-
-/** Advance past a DER length field and return how many bytes were consumed. */
-function derReadLengthBytes(buf: Uint8Array, offset: number): number {
-  if (buf[offset] < 0x80) return 1;
-  const numBytes = buf[offset] & 0x7f;
-  return 1 + numBytes;
-}
-
-/**
- * Walk a DER-encoded SubjectPublicKeyInfo to find the BIT STRING payload
- * (the raw public key bytes, minus the leading "unused bits" octet).
- */
-function extractBitStringPayload(der: Buffer): Uint8Array {
-  let offset = 0;
-
-  // outer SEQUENCE
-  if (der[offset++] !== 0x30) throw new Error("SPKI: expected SEQUENCE");
-  offset += derReadLengthBytes(der, offset);
-
-  // algorithm identifier SEQUENCE — skip entirely
-  if (der[offset] !== 0x30) throw new Error("SPKI: expected algorithm SEQUENCE");
-  offset++; // tag
-  const algoLen = derReadLength(der, offset);
-  offset += derLengthFieldSize(der, offset) + algoLen;
-
-  // BIT STRING
-  if (der[offset++] !== 0x03) throw new Error("SPKI: expected BIT STRING");
-  const bsLen = derReadLength(der, offset);
-  offset += derLengthFieldSize(der, offset);
-
-  // first byte of BIT STRING content is "unused bits count", should be 0
-  const unusedBits = der[offset++];
-  if (unusedBits !== 0) throw new Error("SPKI: expected 0 unused bits in BIT STRING");
-
-  return der.slice(offset, offset + bsLen - 1);
-}
-
-function derReadLength(buf: Buffer, offset: number): number {
-  if (buf[offset] < 0x80) return buf[offset];
-  const numBytes = buf[offset] & 0x7f;
-  let length = 0;
-  for (let i = 1; i <= numBytes; i++) {
-    length = (length << 8) | buf[offset + i];
-  }
-  return length;
-}
-
-function derLengthFieldSize(buf: Buffer, offset: number): number {
-  if (buf[offset] < 0x80) return 1;
-  return 1 + (buf[offset] & 0x7f);
+  const jwk = createPublicKey(pem).export({ format: "jwk" }) as { x: string; y: string };
+  const x = Buffer.from(jwk.x, "base64url");
+  const y = Buffer.from(jwk.y, "base64url");
+  return "0x04" + x.toString("hex") + y.toString("hex");
 }

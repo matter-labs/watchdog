@@ -52,16 +52,15 @@ const main = async () => {
   if (process.env.FLOW_PRIVIDIUM_ENABLE === "1") {
     const prividiumApiUrl = unwrap(process.env.FLOW_PRIVIDIUM_API_URL);
     const prividiumDomain = unwrap(process.env.FLOW_PRIVIDIUM_DOMAIN);
-    const siweSigner = await createWallet(walletKey);
     const prividiumTokenStore: PrividiumTokenStore = { token: null };
 
-    await runSiweFlow(siweSigner, prividiumApiUrl, prividiumDomain, prividiumTokenStore);
+    await runSiweFlow(wallet, prividiumApiUrl, prividiumDomain, prividiumTokenStore);
     l2Provider.setAuthTokenGetter(() => prividiumTokenStore.token);
 
     // Prividium flow (refreshes auth token and records metrics)
     const prividiumIntervalMs = +(process.env.FLOW_PRIVIDIUM_INTERVAL ?? SEC);
     new PrividiumFlow(
-      siweSigner,
+      wallet,
       prividiumDomain,
       prividiumApiUrl,
       prividiumIntervalMs,
@@ -70,7 +69,7 @@ const main = async () => {
     enabledFlows++;
   }
 
-  const l2Wallet = wallet.connect(l2Provider) as typeof wallet;
+  const l2Wallet = wallet.connect(l2Provider);
   const l2WalletLock = new Mutex();
 
   // Lazy initialization of L1 provider, zkSync client and SDK, as they are only needed for some flows
