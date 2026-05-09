@@ -3,11 +3,19 @@ import "dotenv/config";
 import { Gauge } from "prom-client";
 
 import { BaseFlow } from "./baseFlow";
+import { Status } from "./flowMetric";
 import { SEC, timeoutPromise } from "./utils";
 
 import type { Provider } from "ethers";
 
 const FLOW_NAME = "settlement";
+
+export class SettlementDeadlineExceededError extends Error {
+  constructor(settlementAgeSec: number, settlementDeadlineMs: number) {
+    super(`Settlement age ${settlementAgeSec}s exceeds deadline ${settlementDeadlineMs / 1000}s`);
+    this.name = "SettlementDeadlineExceededError";
+  }
+}
 
 export class SettlementFlow extends BaseFlow {
   private metricSettlementAge: Gauge;
@@ -72,9 +80,7 @@ export class SettlementFlow extends BaseFlow {
 
               // Check if it exceeds the deadline
               if (settlementAgeSec * SEC > this.settlementDeadline) {
-                throw new Error(
-                  `Settlement age ${settlementAgeSec}s exceeds deadline ${this.settlementDeadline / 1000}s`
-                );
+                throw new SettlementDeadlineExceededError(settlementAgeSec, this.settlementDeadline);
               }
             } else {
               // No unsettled blocks
@@ -85,10 +91,17 @@ export class SettlementFlow extends BaseFlow {
         });
 
         this.metricRecorder.recordFlowSuccess();
+        this.metricRecorder.recordFinalStatus(Status.OK);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         this.logger.error("Settlement check error: " + error?.message, error?.stack);
-        this.metricRecorder.recordFlowFailure();
+        if (error instanceof SettlementDeadlineExceededError) {
+          this.metricRecorder.recordFlowFailure();
+          this.metricRecorder.recordFinalStatus(Status.FAIL);
+        } else {
+          this.metricRecorder.recordFlowSkipped();
+          this.metricRecorder.recordFinalStatus(Status.SKIP);
+        }
       }
 
       await nextExecutionWait;

@@ -1,6 +1,7 @@
 import "dotenv/config";
 
 import { BaseFlow } from "./baseFlow";
+import { Status } from "./flowMetric";
 import { SEC, timeoutPromise } from "./utils";
 
 import type { JsonRpcProvider } from "ethers";
@@ -31,10 +32,12 @@ export class RpcTestFlow extends BaseFlow {
           },
         });
         this.metricRecorder.recordFlowSuccess();
+        this.metricRecorder.recordFinalStatus(Status.OK);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         this.logger.error("eth_blockNumber error: " + error?.message, error?.stack);
         this.metricRecorder.recordFlowFailure();
+        this.metricRecorder.recordFinalStatus(Status.FAIL);
       }
 
       await nextExecutionWait;

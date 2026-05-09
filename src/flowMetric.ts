@@ -22,6 +22,7 @@ class FlowMetricStore {
   public metric_step_timestamp: Gauge; //in ms
   public metric_latency_total: Gauge;
   public metric_status: Gauge;
+  public metric_final_status: Gauge;
   public metric_status_counter: Counter;
   public metric_status_hist: Histogram;
   public metric_step_gas: Gauge;
@@ -42,6 +43,11 @@ class FlowMetricStore {
       labelNames: ["flow"],
     });
     this.metric_status = new Gauge({ name: "watchdog_status", help: "Watchdog flow status", labelNames: ["flow"] });
+    this.metric_final_status = new Gauge({
+      name: "watchdog_final_status",
+      help: "Watchdog flow status after retries are exhausted or a flow succeeds/skips",
+      labelNames: ["flow"],
+    });
     // DEPRECATED: use `metric_status_counter` instead
     this.metric_status_hist = new Histogram({
       name: "watchdog_status_hist",
@@ -107,6 +113,21 @@ export function recordL1EthBalance(ethBalance: number | bigint) {
 }
 
 type Numberish = number | bigint | string;
+
+function statusMetricValue(status: Status): number {
+  switch (status) {
+    case Status.OK:
+      return 1;
+    case Status.SKIP:
+      return 0.5;
+    case Status.FAIL:
+      return 0;
+    default: {
+      const _exhaustiveCheck: never = status;
+      throw new Error(`Unreachable status: ${_exhaustiveCheck}`);
+    }
+  }
+}
 
 export class FlowMetricRecorder {
   startTime: number | null = null;
@@ -192,6 +213,10 @@ export class FlowMetricRecorder {
     store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure" });
     this.startTime = null;
     this.logger.error("Flow failed");
+  }
+
+  public recordFinalStatus(status: Status) {
+    store.metric_final_status.set({ flow: this.flowName }, statusMetricValue(status));
   }
 
   /// MANUAL FUNCTIONS

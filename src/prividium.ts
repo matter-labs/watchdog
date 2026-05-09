@@ -1,4 +1,5 @@
 import { BaseFlow } from "./baseFlow";
+import { Status } from "./flowMetric";
 import { runSiweFlow } from "./prividiumAuth";
 import { SEC, timeoutPromise } from "./utils";
 
@@ -35,6 +36,7 @@ export class PrividiumFlow extends BaseFlow {
 
         this.logger.info("Prividium SIWE flow completed; token refreshed");
         this.metricRecorder.recordFlowSuccess();
+        this.metricRecorder.recordFinalStatus(Status.OK);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         this.logger.error(`Prividium SIWE flow failed: ${error?.message || error?.toString() || "Unknown error"}`, {
@@ -43,6 +45,7 @@ export class PrividiumFlow extends BaseFlow {
           error: error?.stack || error,
         });
         this.metricRecorder.recordFlowFailure();
+        this.metricRecorder.recordFinalStatus(Status.FAIL);
       }
 
       await nextExecutionWait;

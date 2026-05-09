@@ -82,6 +82,10 @@ Each flow exports its status in the `watchdog_status` metric:
 - `0.5`: Skipped due to gas conditions
 - `0`: Failure
 
+The transfer, RPC test, settlement, and Prividium flows also export `watchdog_final_status`.
+This metric uses the same values, but reports only the final result of the flow cycle. For flows
+with retries, it is updated after the last retry succeeds, skips, or the retry limit is exceeded.
+
 Failed runs may trigger retries, depending on configuration. Alerts should be set up to trigger if status is `0` for over 1–5 minutes.
 
 ### Transfer
@@ -155,6 +159,8 @@ This flow is used to ensure timely L1 settlement.
 Every second it evaluates the age of the oldest unsettled (also known as unexecuted on L1) L2 block.
 This age is measured against the newest L1 block (that is, not local clock time or newest L2 block).
 If it's older than `SETTLEMENT_DEADLINE` (15 minutes by default), the flow is considered failed.
+If the settlement flow cannot read the required L1 or L2 RPC data, the run is marked skipped
+instead of failed because the internal settlement condition could not be evaluated.
 
 Options:
 - `FLOW_SETTLEMENT_ENABLE` -- set to `1` to enable 

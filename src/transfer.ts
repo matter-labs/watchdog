@@ -89,8 +89,10 @@ export class SimpleTxFlow extends BaseFlow {
   public async run() {
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
+      let finalStatus: StatusNoSkip = StatusNoSkip.FAIL;
       for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
         const result = await this.l2WalletLock.withLock(() => this.step());
+        finalStatus = result;
         if (result === StatusNoSkip.OK) {
           this.logger.info(`attempt ${i + 1} succeeded`);
           break;
@@ -99,6 +101,7 @@ export class SimpleTxFlow extends BaseFlow {
         }
         await timeoutPromise(TRANSFER_RETRY_INTERVAL);
       }
+      this.metricRecorder.recordFinalStatus(finalStatus);
       //sleep
       await nextExecutionWait;
     }
