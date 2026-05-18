@@ -1,7 +1,19 @@
 import { JsonRpcProvider } from "ethers";
 import winston from "winston";
 
+import { MIN } from "./utils";
+
 import type { JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
+
+// Upper bound for `waitForTransaction` when the caller passes no `timeout`.
+// Required so the override's setTimeout/off cleanup path always runs and the
+// listener loop can't leak indefinitely (the watchForTransaction listener
+// re-registers itself after every poll to work around an ethers interlacing
+// bug — without a timeout, that loop runs forever once the outer awaiter has
+// rejected). Notably, the zksync-js SDK's deposit/withdrawal `wait` paths
+// call `waitForTransaction(hash)` with no timeout, so this default is what
+// bounds the leak for those flows.
+const WAIT_FOR_TX_DEFAULT_TIMEOUT_MS = +(process.env.WAIT_FOR_TX_DEFAULT_TIMEOUT_MS ?? 60 * MIN);
 
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
 export type AuthTokenGetter = () => string | null;
@@ -112,6 +124,8 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         return this.getTransactionReceipt(hash);
       }
 
+      const effectiveTimeout = timeout != null ? timeout : WAIT_FOR_TX_DEFAULT_TIMEOUT_MS;
+
       return new Promise((resolve, reject) => {
         let timer: null | NodeJS.Timeout = null;
 
@@ -136,16 +150,14 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
           }
         };
 
-        if (timeout != null) {
-          timer = setTimeout(() => {
-            if (timer == null) {
-              return;
-            }
-            timer = null;
-            this.off(hash, listener);
-            reject(new Error("timeout"));
-          }, timeout);
-        }
+        timer = setTimeout(() => {
+          if (timer == null) {
+            return;
+          }
+          timer = null;
+          this.off(hash, listener);
+          reject(new Error("timeout"));
+        }, effectiveTimeout);
 
         this.once(hash, listener);
       });
