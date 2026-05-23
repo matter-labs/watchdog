@@ -18,7 +18,7 @@ import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetr
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
 import type { WatchdogSigner } from "./wallet";
-import type { DepositParams } from "@matterlabs/zksync-js/core";
+import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
@@ -59,8 +59,8 @@ export class DepositFlow extends DepositBaseFlow {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleUnderpricedDeposit(error: any): Promise<void> {
-    const nonce = error.envelope?.context?.nonce as number | undefined;
+  private async computeBumpedFees(error: ZKsyncError): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
+    const nonce = error.envelope.context?.nonce as number | undefined;
     let currentMaxFee: bigint | undefined;
     let currentPriorityFee: bigint | undefined;
     let txHash: string | undefined;
@@ -115,9 +115,10 @@ export class DepositFlow extends DepositBaseFlow {
           `maxFeePerGas ${formatUnits(currentMaxFee, "gwei")} → ${formatUnits(newMaxFee, "gwei")} gwei, ` +
           `maxPriorityFeePerGas ${formatUnits(currentPriorityFee, "gwei")} → ${formatUnits(newPriorityFee, "gwei")} gwei`
       );
-      this.feeOverride = { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
+      return { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
     } else {
       this.logger.warn("Deposit tx underpriced but could not determine fees to bump, will retry");
+      return null;
     }
   }
 
@@ -220,7 +221,7 @@ export class DepositFlow extends DepositBaseFlow {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (isUnderpricedError(error)) {
-        await this.handleUnderpricedDeposit(error);
+        this.feeOverride = await this.computeBumpedFees(error);
       } else {
         this.feeOverride = null;
         this.logger.error("deposit tx error: " + error?.message, error?.stack);
