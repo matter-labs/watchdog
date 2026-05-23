@@ -1,8 +1,9 @@
 import "dotenv/config";
 
 import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
+import { isZKsyncError } from "@matterlabs/zksync-js/core/types/errors";
 import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
-import { formatEther, MaxInt256, parseEther, parseUnits } from "ethers";
+import { formatEther, formatUnits, MaxInt256, parseEther, parseUnits } from "ethers";
 
 import {
   DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI,
@@ -19,13 +20,22 @@ import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import type { WatchdogSigner } from "./wallet";
 import type { DepositParams } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
+import type { JsonRpcProvider } from "ethers";
 
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
 const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
+const DEFAULT_FEE_BUMP_PERCENT = 10;
+const FEE_BUMP_PERCENT_ENV = "FLOW_DEPOSIT_FEE_BUMP_PERCENT";
+
+function isUnderpricedError(e: unknown): boolean {
+  return isZKsyncError(e) && (e.envelope.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
+}
 
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
+  private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
+  private feeOverride: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null = null;
 
   constructor(
     wallet: WatchdogSigner,
@@ -46,6 +56,69 @@ export class DepositFlow extends DepositBaseFlow {
     }
 
     return providerTip;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async handleUnderpricedDeposit(error: any): Promise<void> {
+    const nonce = error.envelope?.context?.nonce as number | undefined;
+    let currentMaxFee: bigint | undefined;
+    let currentPriorityFee: bigint | undefined;
+    let txHash: string | undefined;
+
+    // Step 1: fetch the pending tx from mempool to get its exact fees
+    if (nonce !== undefined) {
+      try {
+        type RpcTx = { hash: string; maxFeePerGas: string; maxPriorityFeePerGas: string } | null;
+        // AbstractProvider doesn't expose send method, so casting to JsonRpcProvider.
+        const pendingTx = (await (this.client.l1 as unknown as JsonRpcProvider).send(
+          "eth_getTransactionBySenderAndNonce",
+          [this.wallet.address, `0x${nonce.toString(16)}`]
+        )) as RpcTx;
+        if (pendingTx) {
+          txHash = pendingTx.hash;
+          currentMaxFee = BigInt(pendingTx.maxFeePerGas);
+          currentPriorityFee = BigInt(pendingTx.maxPriorityFeePerGas);
+        }
+      } catch (rpcErr: unknown) {
+        this.logger.error(`Failed to fetch pending tx for nonce ${nonce}: ${(rpcErr as Error)?.message}`);
+      }
+    }
+
+    // Step 2: fallback — use SDK quote to estimate fees
+    if (currentMaxFee == null || currentPriorityFee == null) {
+      try {
+        const minPriorityFee = await this.getMinPriorityFeePerGas();
+        const quoteParams = {
+          to: this.wallet.address,
+          token: this.baseToken,
+          amount: 1n,
+          refundRecipient: this.wallet.address,
+          l1TxOverrides: {
+            nonce: "latest",
+            maxPriorityFeePerGas: minPriorityFee,
+          },
+        } as DepositParams;
+        const quote = await this.sdk.deposits.quote(quoteParams);
+        currentMaxFee = quote.fees.l1!.maxFeePerGas;
+        currentPriorityFee = quote.fees.l1!.maxPriorityFeePerGas || minPriorityFee;
+      } catch (quoteErr: unknown) {
+        this.logger.error(`Failed to get fee estimate for underpriced retry: ${(quoteErr as Error)?.message}`);
+      }
+    }
+
+    if (currentMaxFee != null && currentPriorityFee != null) {
+      const newMaxFee = (currentMaxFee * BigInt(100 + this.feeBumpPercent)) / 100n;
+      const newPriorityFee = (currentPriorityFee * BigInt(100 + this.feeBumpPercent)) / 100n;
+      this.logger.warn(
+        `Deposit tx underpriced, bumping fees by ${this.feeBumpPercent}%: ` +
+          `txHash=${txHash ?? "unknown"}, ` +
+          `maxFeePerGas ${formatUnits(currentMaxFee, "gwei")} → ${formatUnits(newMaxFee, "gwei")} gwei, ` +
+          `maxPriorityFeePerGas ${formatUnits(currentPriorityFee, "gwei")} → ${formatUnits(newPriorityFee, "gwei")} gwei`
+      );
+      this.feeOverride = { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
+    } else {
+      this.logger.warn("Deposit tx underpriced but could not determine fees to bump, will retry");
+    }
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -85,7 +158,9 @@ export class DepositFlow extends DepositBaseFlow {
             refundRecipient: this.wallet.address,
             l1TxOverrides: {
               nonce: "latest",
-              maxPriorityFeePerGas: await this.getMinPriorityFeePerGas(),
+              ...(this.feeOverride || {
+                maxPriorityFeePerGas: await this.getMinPriorityFeePerGas(),
+              }),
             },
           } as DepositParams;
           const depositQuote = await this.sdk.deposits.quote(params);
@@ -140,10 +215,16 @@ export class DepositFlow extends DepositBaseFlow {
       });
       this.logger.info(`Tx ${txHashes} mined on L2`);
       this.metricRecorder.recordFlowSuccess();
+      this.feeOverride = null;
       return Status.OK;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
-      this.logger.error("deposit tx error: " + error?.message, error?.stack);
+      if (isUnderpricedError(error)) {
+        await this.handleUnderpricedDeposit(error);
+      } else {
+        this.feeOverride = null;
+        this.logger.error("deposit tx error: " + error?.message, error?.stack);
+      }
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
     }
