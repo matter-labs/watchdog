@@ -1,7 +1,6 @@
 import "dotenv/config";
 
 import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
-import { isZKsyncError } from "@matterlabs/zksync-js/core/types/errors";
 import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
 import { formatEther, formatUnits, MaxInt256, parseEther, parseUnits } from "ethers";
 
@@ -28,8 +27,8 @@ const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
 const DEFAULT_FEE_BUMP_PERCENT = 10;
 const FEE_BUMP_PERCENT_ENV = "FLOW_DEPOSIT_FEE_BUMP_PERCENT";
 
-function isUnderpricedError(e: unknown): boolean {
-  return isZKsyncError(e) && (e.envelope.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
+function isUnderpricedError(e: ZKsyncError): boolean {
+  return (e?.envelope?.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
 }
 
 export class DepositFlow extends DepositBaseFlow {
