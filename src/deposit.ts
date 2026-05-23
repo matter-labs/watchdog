@@ -58,8 +58,9 @@ export class DepositFlow extends DepositBaseFlow {
     return providerTip;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async computeBumpedFees(error: ZKsyncError): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
+  private async computeBumpedFees(
+    error: ZKsyncError
+  ): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
     const nonce = error.envelope.context?.nonce as number | undefined;
     let currentMaxFee: bigint | undefined;
     let currentPriorityFee: bigint | undefined;
