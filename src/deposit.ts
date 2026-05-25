@@ -31,6 +31,11 @@ function isUnderpricedError(e: ZKsyncError): boolean {
   return (e?.envelope?.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
 }
 
+function maxOptionalBigInt(a: bigint | undefined, b: bigint | undefined): bigint | undefined {
+  if (a != null && b != null) return a > b ? a : b;
+  return a ?? b;
+}
+
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
   private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
@@ -61,11 +66,11 @@ export class DepositFlow extends DepositBaseFlow {
     error: ZKsyncError
   ): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
     const nonce = error.envelope.context?.nonce as number | undefined;
-    let currentMaxFee: bigint | undefined;
-    let currentPriorityFee: bigint | undefined;
+    let mempoolMaxFee: bigint | undefined;
+    let mempoolPriorityFee: bigint | undefined;
     let txHash: string | undefined;
 
-    // Step 1: fetch the pending tx from mempool to get its exact fees
+    // Step 1: fetch the pending tx from mempool and bump its fees
     if (nonce !== undefined) {
       try {
         type RpcTx = { hash: string; maxFeePerGas: string; maxPriorityFeePerGas: string } | null;
@@ -76,44 +81,45 @@ export class DepositFlow extends DepositBaseFlow {
         )) as RpcTx;
         if (pendingTx) {
           txHash = pendingTx.hash;
-          currentMaxFee = BigInt(pendingTx.maxFeePerGas);
-          currentPriorityFee = BigInt(pendingTx.maxPriorityFeePerGas);
+          mempoolMaxFee = (BigInt(pendingTx.maxFeePerGas) * BigInt(100 + this.feeBumpPercent)) / 100n;
+          mempoolPriorityFee = (BigInt(pendingTx.maxPriorityFeePerGas) * BigInt(100 + this.feeBumpPercent)) / 100n;
         }
       } catch (rpcErr: unknown) {
         this.logger.error(`Failed to fetch pending tx for nonce ${nonce}: ${(rpcErr as Error)?.message}`);
       }
     }
 
-    // Step 2: fallback — use SDK quote to estimate fees
-    if (currentMaxFee == null || currentPriorityFee == null) {
-      try {
-        const minPriorityFee = await this.getMinPriorityFeePerGas();
-        const quoteParams = {
-          to: this.wallet.address,
-          token: this.baseToken,
-          amount: 1n,
-          refundRecipient: this.wallet.address,
-          l1TxOverrides: {
-            nonce: "latest",
-            maxPriorityFeePerGas: minPriorityFee,
-          },
-        } as DepositParams;
-        const quote = await this.sdk.deposits.quote(quoteParams);
-        currentMaxFee = quote.fees.l1!.maxFeePerGas;
-        currentPriorityFee = quote.fees.l1!.maxPriorityFeePerGas || minPriorityFee;
-      } catch (quoteErr: unknown) {
-        this.logger.error(`Failed to get fee estimate for underpriced retry: ${(quoteErr as Error)?.message}`);
-      }
+    // Step 2: get SDK quote for current market fees (no bump — already reflects live market)
+    let quoteMaxFee: bigint | undefined;
+    let quotePriorityFee: bigint | undefined;
+    try {
+      const minPriorityFee = await this.getMinPriorityFeePerGas();
+      const quoteParams = {
+        to: this.wallet.address,
+        token: this.baseToken,
+        amount: 1n,
+        refundRecipient: this.wallet.address,
+        l1TxOverrides: {
+          nonce: "latest",
+          maxPriorityFeePerGas: minPriorityFee,
+        },
+      } as DepositParams;
+      const quote = await this.sdk.deposits.quote(quoteParams);
+      quoteMaxFee = quote.fees.l1!.maxFeePerGas;
+      quotePriorityFee = quote.fees.l1!.maxPriorityFeePerGas || minPriorityFee;
+    } catch (quoteErr: unknown) {
+      this.logger.error(`Failed to get fee estimate for underpriced retry: ${(quoteErr as Error)?.message}`);
     }
 
-    if (currentMaxFee != null && currentPriorityFee != null) {
-      const newMaxFee = (currentMaxFee * BigInt(100 + this.feeBumpPercent)) / 100n;
-      const newPriorityFee = (currentPriorityFee * BigInt(100 + this.feeBumpPercent)) / 100n;
+    const newMaxFee = maxOptionalBigInt(mempoolMaxFee, quoteMaxFee);
+    const newPriorityFee = maxOptionalBigInt(mempoolPriorityFee, quotePriorityFee);
+
+    if (newMaxFee != null && newPriorityFee != null) {
       this.logger.warn(
-        `Deposit tx underpriced, bumping fees by ${this.feeBumpPercent}%: ` +
+        `Deposit tx underpriced, new fees (bumped mempool +${this.feeBumpPercent}% vs SDK quote, taking max): ` +
           `txHash=${txHash ?? "unknown"}, ` +
-          `maxFeePerGas ${formatUnits(currentMaxFee, "gwei")} → ${formatUnits(newMaxFee, "gwei")} gwei, ` +
-          `maxPriorityFeePerGas ${formatUnits(currentPriorityFee, "gwei")} → ${formatUnits(newPriorityFee, "gwei")} gwei`
+          `maxFeePerGas=${formatUnits(newMaxFee, "gwei")} gwei, ` +
+          `maxPriorityFeePerGas=${formatUnits(newPriorityFee, "gwei")} gwei`
       );
       return { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
     } else {
