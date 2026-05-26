@@ -21,6 +21,8 @@ import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
+type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
 const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
@@ -39,7 +41,7 @@ function maxOptionalBigInt(a: bigint | undefined, b: bigint | undefined): bigint
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
   private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
-  private feeOverride: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null = null;
+  private feeOverride: Fee | null = null;
 
   constructor(
     wallet: WatchdogSigner,
@@ -50,21 +52,16 @@ export class DepositFlow extends DepositBaseFlow {
     super(wallet, client, FLOW_NAME, intervalMs);
   }
 
-  private async getMinPriorityFeePerGas(): Promise<bigint> {
+  private getMinPriorityFeePerGas(depositPriorityFee: bigint | null = null): bigint {
     const configuredValue = process.env[MIN_PRIORITY_FEE_ENV] ?? DEFAULT_MIN_PRIORITY_FEE_GWEI;
     const configuredMin = parseUnits(configuredValue, "gwei");
-    const providerTip = (await this.client.l1.getFeeData()).maxPriorityFeePerGas;
-
-    if (providerTip == null || providerTip < configuredMin) {
+    if (depositPriorityFee == null || depositPriorityFee < configuredMin) {
       return configuredMin;
     }
-
-    return providerTip;
+    return depositPriorityFee;
   }
 
-  private async computeBumpedFees(
-    error: ZKsyncError
-  ): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
+  private async computeBumpedFees(error: ZKsyncError): Promise<Fee | null> {
     const nonce = error.envelope.context?.nonce as number | undefined;
     let mempoolMaxFee: bigint | undefined;
     let mempoolPriorityFee: bigint | undefined;
@@ -93,16 +90,12 @@ export class DepositFlow extends DepositBaseFlow {
     let quoteMaxFee: bigint | undefined;
     let quotePriorityFee: bigint | undefined;
     try {
-      const minPriorityFee = await this.getMinPriorityFeePerGas();
+      const minPriorityFee = this.getMinPriorityFeePerGas();
       const quoteParams = {
         to: this.wallet.address,
         token: this.baseToken,
         amount: 1n,
         refundRecipient: this.wallet.address,
-        l1TxOverrides: {
-          nonce: "latest",
-          maxPriorityFeePerGas: minPriorityFee,
-        },
       } as DepositParams;
       const quote = await this.sdk.deposits.quote(quoteParams);
       quoteMaxFee = quote.fees.l1!.maxFeePerGas;
@@ -163,12 +156,6 @@ export class DepositFlow extends DepositBaseFlow {
             token: this.baseToken,
             amount: 1n, // just 1 wei
             refundRecipient: this.wallet.address,
-            l1TxOverrides: {
-              nonce: "latest",
-              ...(this.feeOverride || {
-                maxPriorityFeePerGas: await this.getMinPriorityFeePerGas(),
-              }),
-            },
           } as DepositParams;
           const depositQuote = await this.sdk.deposits.quote(params);
           recordStepGas(depositQuote.fees.l1!.gasLimit);
@@ -194,7 +181,15 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const depositHandle = await this.sdk.deposits.create(deposit.params);
+          const depositHandle = await this.sdk.deposits.create({
+            ...deposit.params,
+            l1TxOverrides: {
+              nonce: "latest",
+              ...(this.feeOverride || {
+                maxPriorityFeePerGas: this.getMinPriorityFeePerGas(deposit.quote.fees.l1?.maxPriorityFeePerGas),
+              }),
+            },
+          } as DepositParams);
           const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));
