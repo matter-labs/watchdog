@@ -12,7 +12,8 @@
     "typecheck": "tsc -p . --noEmit",
     "lint": "eslint src --fix --max-warnings=0",
     "lint:check": "eslint src --max-warnings=0",
-    "start": "ts-node src/main.ts"
+    "start": "ts-node src/main.ts",
+    "start:prod": "node --enable-source-maps dist/main.js"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
