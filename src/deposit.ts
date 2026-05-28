@@ -193,17 +193,17 @@ export class DepositFlow extends DepositBaseFlow {
               }),
             },
           } as DepositParams);
-          const txReceipt = unwrap(await this.client.l1.waitForTransaction(depositHandle.l1TxHash, 1, timeoutMs));
-          recordStepGas(unwrap(txReceipt.gasUsed));
-          recordStepGasPrice(unwrap(txReceipt.gasPrice));
-          recordStepGasCost(unwrap(txReceipt.gasUsed) * unwrap(txReceipt.gasPrice));
+          const txReceipt = await this.client.l1.waitForTransaction(depositHandle.l1TxHash, 1, timeoutMs);
+          recordStepGas(unwrap(txReceipt?.gasUsed));
+          recordStepGasPrice(unwrap(txReceipt?.gasPrice));
+          recordStepGasCost(unwrap(txReceipt?.gasUsed) * unwrap(txReceipt?.gasPrice));
 
           return { l1Tx: txReceipt };
         },
       }); // included in a block on L1
 
-      const l2TxHash = unwrap(getL2TransactionHashFromLogs(l1Tx.logs), "l2TxHash from L1 logs");
-      const txHashes = `(L1: ${l1Tx.hash}, L2: ${l2TxHash})`;
+      const l2TxHash = getL2TransactionHashFromLogs(l1Tx!.logs)!;
+      const txHashes = `(L1: ${l1Tx?.hash}, L2: ${l2TxHash})`;
       this.logger.info(`Tx ${txHashes} mined on l1`);
 
       // wait for deposit to be finalized
