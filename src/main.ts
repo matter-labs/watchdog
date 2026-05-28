@@ -16,7 +16,7 @@ import { LoggingJsonRpcProvider } from "./rpcLoggingProvider";
 import { RpcTestFlow } from "./rpcTest";
 import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
-import { SEC, unwrap } from "./utils";
+import { MIN, SEC, unwrap } from "./utils";
 import { createWallet } from "./wallet";
 import { WithdrawalFlow } from "./withdrawal";
 import { WithdrawalReceiptStore } from "./withdrawalBase";
@@ -118,12 +118,7 @@ const main = async () => {
   recordWalletInfo(l2Wallet.address);
 
   if (process.env.FLOW_TRANSFER_ENABLE === "1") {
-    new SimpleTxFlow(
-      l2Wallet,
-      l2WalletLock,
-      l2Provider,
-      +unwrap(process.env.FLOW_TRANSFER_INTERVAL, "FLOW_TRANSFER_INTERVAL")
-    ).runWithRestart();
+    new SimpleTxFlow(l2Wallet, l2WalletLock, l2Provider, +(process.env.FLOW_TRANSFER_INTERVAL ?? MIN)).runWithRestart();
     enabledFlows++;
   }
 
