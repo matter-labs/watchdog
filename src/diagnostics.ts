@@ -5,8 +5,14 @@ import winston from "winston";
 const memRss = new Gauge({ name: "watchdog_diag_mem_rss_bytes", help: "Process resident set size in bytes" });
 const memHeapUsed = new Gauge({ name: "watchdog_diag_mem_heap_used_bytes", help: "V8 heap used in bytes" });
 const memHeapTotal = new Gauge({ name: "watchdog_diag_mem_heap_total_bytes", help: "V8 heap total in bytes" });
-const memExternal = new Gauge({ name: "watchdog_diag_mem_external_bytes", help: "External memory (e.g. Buffers) in bytes" });
-const memArrayBuffers = new Gauge({ name: "watchdog_diag_mem_array_buffers_bytes", help: "ArrayBuffer memory in bytes" });
+const memExternal = new Gauge({
+  name: "watchdog_diag_mem_external_bytes",
+  help: "External memory (e.g. Buffers) in bytes",
+});
+const memArrayBuffers = new Gauge({
+  name: "watchdog_diag_mem_array_buffers_bytes",
+  help: "ArrayBuffer memory in bytes",
+});
 
 const activeHandles = new Gauge({
   name: "watchdog_diag_active_handles",
