@@ -109,6 +109,8 @@ Options:
   If its exceeded in **estimation** the flow will skip
 - `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` -- minimum L1 `maxPriorityFeePerGas` to use for
   watchdog deposit transactions (default: `0.001`)
+- `FLOW_DEPOSIT_FEE_BUMP_PERCENT` -- percentage to increase both `maxFeePerGas` and
+  `maxPriorityFeePerGas` when a deposit transaction is rejected as underpriced (default: `10`)
 - `MAX_LOGS_BLOCKS` -- max number of blocks in range of `eth_getLogs` request
 
 ### Deposit User

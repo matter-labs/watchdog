@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
 import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
-import { formatEther, MaxInt256, parseEther, parseUnits } from "ethers";
+import { formatEther, formatUnits, MaxInt256, parseEther, parseUnits } from "ethers";
 
 import {
   DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI,
@@ -17,15 +17,31 @@ import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetr
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 
 import type { WatchdogSigner } from "./wallet";
-import type { DepositParams } from "@matterlabs/zksync-js/core";
+import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
+import type { JsonRpcProvider } from "ethers";
+
+type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
 
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
 const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
+const DEFAULT_FEE_BUMP_PERCENT = 10;
+const FEE_BUMP_PERCENT_ENV = "FLOW_DEPOSIT_FEE_BUMP_PERCENT";
+
+function isUnderpricedError(e: ZKsyncError): boolean {
+  return (e?.envelope?.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
+}
+
+function maxOptionalBigInt(a: bigint | undefined, b: bigint | undefined): bigint | undefined {
+  if (a != null && b != null) return a > b ? a : b;
+  return a ?? b;
+}
 
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
+  private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
+  private feeOverride: Fee | null = null;
 
   constructor(
     wallet: WatchdogSigner,
@@ -36,16 +52,73 @@ export class DepositFlow extends DepositBaseFlow {
     super(wallet, client, FLOW_NAME, intervalMs);
   }
 
-  private async getMinPriorityFeePerGas(): Promise<bigint> {
+  private getMinPriorityFeePerGas(depositPriorityFee: bigint | null = null): bigint {
     const configuredValue = process.env[MIN_PRIORITY_FEE_ENV] ?? DEFAULT_MIN_PRIORITY_FEE_GWEI;
     const configuredMin = parseUnits(configuredValue, "gwei");
-    const providerTip = (await this.client.l1.getFeeData()).maxPriorityFeePerGas;
-
-    if (providerTip == null || providerTip < configuredMin) {
+    if (depositPriorityFee == null || depositPriorityFee < configuredMin) {
       return configuredMin;
     }
+    return depositPriorityFee;
+  }
 
-    return providerTip;
+  private async computeBumpedFees(error: ZKsyncError): Promise<Fee | null> {
+    const nonce = error.envelope.context?.nonce as number | undefined;
+    let mempoolMaxFee: bigint | undefined;
+    let mempoolPriorityFee: bigint | undefined;
+    let txHash: string | undefined;
+
+    // Step 1: fetch the pending tx from mempool and bump its fees
+    if (nonce !== undefined) {
+      try {
+        type RpcTx = { hash: string; maxFeePerGas: string; maxPriorityFeePerGas: string } | null;
+        // AbstractProvider doesn't expose send method, so casting to JsonRpcProvider.
+        const pendingTx = (await (this.client.l1 as unknown as JsonRpcProvider).send(
+          "eth_getTransactionBySenderAndNonce",
+          [this.wallet.address, `0x${nonce.toString(16)}`]
+        )) as RpcTx;
+        if (pendingTx) {
+          txHash = pendingTx.hash;
+          mempoolMaxFee = (BigInt(pendingTx.maxFeePerGas) * BigInt(100 + this.feeBumpPercent)) / 100n;
+          mempoolPriorityFee = (BigInt(pendingTx.maxPriorityFeePerGas) * BigInt(100 + this.feeBumpPercent)) / 100n;
+        }
+      } catch (rpcErr: unknown) {
+        this.logger.error(`Failed to fetch pending tx for nonce ${nonce}: ${(rpcErr as Error)?.message}`);
+      }
+    }
+
+    // Step 2: get SDK quote for current market fees (no bump — already reflects live market)
+    let quoteMaxFee: bigint | undefined;
+    let quotePriorityFee: bigint | undefined;
+    try {
+      const minPriorityFee = this.getMinPriorityFeePerGas();
+      const quoteParams = {
+        to: this.wallet.address,
+        token: this.baseToken,
+        amount: 1n,
+        refundRecipient: this.wallet.address,
+      } as DepositParams;
+      const quote = await this.sdk.deposits.quote(quoteParams);
+      quoteMaxFee = quote.fees.l1!.maxFeePerGas;
+      quotePriorityFee = quote.fees.l1!.maxPriorityFeePerGas || minPriorityFee;
+    } catch (quoteErr: unknown) {
+      this.logger.error(`Failed to get fee estimate for underpriced retry: ${(quoteErr as Error)?.message}`);
+    }
+
+    const newMaxFee = maxOptionalBigInt(mempoolMaxFee, quoteMaxFee);
+    const newPriorityFee = maxOptionalBigInt(mempoolPriorityFee, quotePriorityFee);
+
+    if (newMaxFee != null && newPriorityFee != null) {
+      this.logger.warn(
+        `Deposit tx underpriced, new fees (bumped mempool +${this.feeBumpPercent}% vs SDK quote, taking max): ` +
+          `txHash=${txHash ?? "unknown"}, ` +
+          `maxFeePerGas=${formatUnits(newMaxFee, "gwei")} gwei, ` +
+          `maxPriorityFeePerGas=${formatUnits(newPriorityFee, "gwei")} gwei`
+      );
+      return { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
+    } else {
+      this.logger.warn("Deposit tx underpriced but could not determine fees to bump, will retry");
+      return null;
+    }
   }
 
   protected async executeWatchdogDeposit(): Promise<Status> {
@@ -83,10 +156,6 @@ export class DepositFlow extends DepositBaseFlow {
             token: this.baseToken,
             amount: 1n, // just 1 wei
             refundRecipient: this.wallet.address,
-            l1TxOverrides: {
-              nonce: "latest",
-              maxPriorityFeePerGas: await this.getMinPriorityFeePerGas(),
-            },
           } as DepositParams;
           const depositQuote = await this.sdk.deposits.quote(params);
           recordStepGas(depositQuote.fees.l1!.gasLimit);
@@ -111,19 +180,25 @@ export class DepositFlow extends DepositBaseFlow {
       // NOTE: bypasses sdk.deposits.wait — internally it calls
       // client.l1.waitForTransaction WITHOUT a timeout, so on step timeout the
       // poller would leak. Using ethers' native timeout cleans up the subscriber.
-      const { l1Tx, depositHandle } = await this.metricRecorder.stepExecution({
+      const { l1Tx } = await this.metricRecorder.stepExecution({
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost, timeoutMs }) => {
-          const depositHandle = await this.sdk.deposits.create(deposit.params);
-          const txReceipt = unwrap(
-            await this.client.l1.waitForTransaction(depositHandle.l1TxHash, 1, timeoutMs)
-          );
+          const depositHandle = await this.sdk.deposits.create({
+            ...deposit.params,
+            l1TxOverrides: {
+              nonce: "latest",
+              ...(this.feeOverride || {
+                maxPriorityFeePerGas: this.getMinPriorityFeePerGas(deposit.quote.fees.l1?.maxPriorityFeePerGas),
+              }),
+            },
+          } as DepositParams);
+          const txReceipt = unwrap(await this.client.l1.waitForTransaction(depositHandle.l1TxHash, 1, timeoutMs));
           recordStepGas(unwrap(txReceipt.gasUsed));
           recordStepGasPrice(unwrap(txReceipt.gasPrice));
           recordStepGasCost(unwrap(txReceipt.gasUsed) * unwrap(txReceipt.gasPrice));
 
-          return { l1Tx: txReceipt, depositHandle };
+          return { l1Tx: txReceipt };
         },
       }); // included in a block on L1
 
@@ -146,10 +221,16 @@ export class DepositFlow extends DepositBaseFlow {
       });
       this.logger.info(`Tx ${txHashes} mined on L2`);
       this.metricRecorder.recordFlowSuccess();
+      this.feeOverride = null;
       return Status.OK;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
-      this.logger.error("deposit tx error: " + error?.message, error?.stack);
+      if (isUnderpricedError(error)) {
+        this.feeOverride = await this.computeBumpedFees(error);
+      } else {
+        this.feeOverride = null;
+        this.logger.error("deposit tx error: " + error?.message, error?.stack);
+      }
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
     }
