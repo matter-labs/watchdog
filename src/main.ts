@@ -7,6 +7,7 @@ import winston from "winston";
 
 import { SETTLEMENT_DEADLINE } from "./configs";
 import { DepositFlow } from "./deposit";
+import { installHeapSnapshotHandler, startDiagnosticsLoop } from "./diagnostics";
 import { recordWalletInfo } from "./flowMetric";
 import { Mutex } from "./lock";
 import { setupLogger } from "./logger";
@@ -36,6 +37,8 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
 
 const main = async () => {
   setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
+  startDiagnosticsLoop(+(process.env.DIAGNOSTICS_INTERVAL_MS ?? 30_000));
+  installHeapSnapshotHandler();
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
   const walletKey = unwrap(process.env.WALLET_KEY, "WALLET_KEY");
   const wallet = await createWallet(walletKey);

@@ -67,8 +67,8 @@ export class SimpleTxFlow extends BaseFlow {
       await this.metricRecorder.stepExecution({
         stepName: "execution",
         stepTimeoutMs: L2_EXECUTION_TIMEOUT,
-        fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const receipt = unwrap(await this.provider.waitForTransaction(txResponse.hash, 1));
+        fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost, timeoutMs }) => {
+          const receipt = unwrap(await this.provider.waitForTransaction(txResponse.hash, 1, timeoutMs));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));

@@ -108,30 +108,36 @@ export class DepositFlow extends DepositBaseFlow {
       }
 
       // send L1 deposit transaction
+      // NOTE: bypasses sdk.deposits.wait — internally it calls
+      // client.l1.waitForTransaction WITHOUT a timeout, so on step timeout the
+      // poller would leak. Using ethers' native timeout cleans up the subscriber.
       const { l1Tx, depositHandle } = await this.metricRecorder.stepExecution({
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
-        fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
+        fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost, timeoutMs }) => {
           const depositHandle = await this.sdk.deposits.create(deposit.params);
-          const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
-          recordStepGas(unwrap(txReceipt?.gasUsed));
-          recordStepGasPrice(unwrap(txReceipt?.gasPrice));
-          recordStepGasCost(unwrap(txReceipt?.gasUsed) * unwrap(txReceipt?.gasPrice));
+          const txReceipt = unwrap(
+            await this.client.l1.waitForTransaction(depositHandle.l1TxHash, 1, timeoutMs)
+          );
+          recordStepGas(unwrap(txReceipt.gasUsed));
+          recordStepGasPrice(unwrap(txReceipt.gasPrice));
+          recordStepGasCost(unwrap(txReceipt.gasUsed) * unwrap(txReceipt.gasPrice));
 
           return { l1Tx: txReceipt, depositHandle };
         },
       }); // included in a block on L1
 
-      const l2TxHash = getL2TransactionHashFromLogs(l1Tx!.logs);
-      const txHashes = `(L1: ${l1Tx?.hash}, L2: ${l2TxHash})`;
+      const l2TxHash = unwrap(getL2TransactionHashFromLogs(l1Tx.logs), "l2TxHash from L1 logs");
+      const txHashes = `(L1: ${l1Tx.hash}, L2: ${l2TxHash})`;
       this.logger.info(`Tx ${txHashes} mined on l1`);
 
       // wait for deposit to be finalized
+      // Same reason as above: SDK's 'l2' wait path uses no timeout.
       await this.metricRecorder.stepExecution({
         stepName: STEPS.l2_execution,
         stepTimeoutMs: PRIORITY_OP_TIMEOUT,
-        fn: async ({ recordStepGasPrice, recordStepGas, recordStepGasCost }) => {
-          const receipt = unwrap(await this.sdk.deposits.wait(depositHandle, { for: "l2" }));
+        fn: async ({ recordStepGasPrice, recordStepGas, recordStepGasCost, timeoutMs }) => {
+          const receipt = unwrap(await this.client.l2.waitForTransaction(l2TxHash, 1, timeoutMs));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasCost(unwrap(receipt.gasUsed) * unwrap(receipt.gasPrice));

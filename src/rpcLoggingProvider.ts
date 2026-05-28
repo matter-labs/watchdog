@@ -1,6 +1,8 @@
 import { JsonRpcProvider } from "ethers";
 import winston from "winston";
 
+import { recordRpcEnd, recordRpcStart } from "./diagnostics";
+
 import type { JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
 
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
@@ -55,6 +57,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
       });
 
       const startTime = Date.now();
+      recordRpcStart(method);
       try {
         let result: unknown;
         const token = self.getAuthToken?.();
@@ -99,6 +102,8 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         });
 
         throw error;
+      } finally {
+        recordRpcEnd();
       }
     }
 

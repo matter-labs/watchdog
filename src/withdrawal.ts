@@ -59,19 +59,16 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
       this.logger.info(`Tx (L2: ${withdrawalHandle.l2TxHash}) sent on L2`);
 
       // wait for transaction to be included in L2 block
+      // NOTE: bypasses sdk.withdrawals.wait — its 'l2' path calls
+      // provider.waitForTransaction WITHOUT a timeout, so on step timeout the
+      // poller would leak. Using ethers' native timeout cleans up the subscriber.
       await this.metricRecorder.stepExecution({
         stepName: STEPS.l2_execution,
         stepTimeoutMs: L2_EXECUTION_TIMEOUT,
-        fn: async ({
-          recordStepGas,
-          recordStepGasPrice,
-          recordStepGasCost,
-        }: {
-          recordStepGas: (gas: bigint) => void;
-          recordStepGasPrice: (price: bigint) => void;
-          recordStepGasCost: (cost: bigint) => void;
-        }) => {
-          const receipt = unwrap(await this.sdk.withdrawals.wait(withdrawalHandle, { for: "l2" }));
+        fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost, timeoutMs }) => {
+          const receipt = unwrap(
+            await this.wallet.provider!.waitForTransaction(withdrawalHandle.l2TxHash, 1, timeoutMs)
+          );
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));

@@ -2,6 +2,7 @@ import { Counter, Gauge, Histogram } from "prom-client";
 
 import { withTimeout } from "./utils";
 
+import type { TimeoutCtx } from "./utils";
 import type { Logger } from "winston";
 
 export const StatusNoSkip = {
@@ -108,6 +109,20 @@ export function recordL1EthBalance(ethBalance: number | bigint) {
 
 type Numberish = number | bigint | string;
 
+/**
+ * Callback helpers passed to `stepExecution`'s `fn`. The `signal` and
+ * `timeoutMs` MUST be forwarded to any underlying long-lived operations
+ * (ethers `waitForTransaction(hash, confirms, timeoutMs)`, `fetch({signal})`,
+ * etc.) — otherwise the inner work keeps running after the step times out.
+ */
+export interface StepHelpers {
+  recordStepGas: (gas: Numberish) => void;
+  recordStepGasPrice: (price: Numberish) => void;
+  recordStepGasCost: (cost: Numberish) => void;
+  signal: AbortSignal;
+  timeoutMs: number;
+}
+
 export class FlowMetricRecorder {
   startTime: number | null = null;
   private _lastStepLatency: number | null = null;
@@ -129,14 +144,10 @@ export class FlowMetricRecorder {
   }: {
     stepName: string;
     stepTimeoutMs: number;
-    fn: (helpers: {
-      recordStepGas: (gas: Numberish) => void;
-      recordStepGasPrice: (price: Numberish) => void;
-      recordStepGasCost: (cost: Numberish) => void;
-    }) => Promise<T>;
+    fn: (helpers: StepHelpers) => Promise<T>;
   }): Promise<T> {
     const start = Date.now();
-    const helpers = {
+    const makeHelpers = (ctx: TimeoutCtx): StepHelpers => ({
       recordStepGas: (gas: Numberish) => {
         store.metric_step_gas.set({ flow: this.flowName, step: stepName }, Number(gas));
       },
@@ -146,8 +157,10 @@ export class FlowMetricRecorder {
       recordStepGasCost: (cost: Numberish) => {
         store.metric_step_gas_cost.set({ flow: this.flowName, step: stepName }, Number(cost));
       },
-    };
-    const ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
+      signal: ctx.signal,
+      timeoutMs: ctx.timeoutMs,
+    });
+    const ret = await withTimeout((ctx) => fn(makeHelpers(ctx)), stepTimeoutMs, `step ${stepName}`);
     const end = Date.now();
     const latency = (end - start) / 1000; // in seconds
     store.metric_latency.set({ flow: this.flowName, stage: stepName }, latency);
