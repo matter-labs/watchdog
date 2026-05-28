@@ -202,7 +202,7 @@ export class DepositFlow extends DepositBaseFlow {
         },
       }); // included in a block on L1
 
-      const l2TxHash = getL2TransactionHashFromLogs(l1Tx!.logs)!;
+      const l2TxHash = unwrap(getL2TransactionHashFromLogs(unwrap(l1Tx).logs));
       const txHashes = `(L1: ${l1Tx?.hash}, L2: ${l2TxHash})`;
       this.logger.info(`Tx ${txHashes} mined on l1`);
 
