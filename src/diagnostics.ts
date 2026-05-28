@@ -69,7 +69,7 @@ function snapshot(): void {
     activeHandles.set({ type }, count);
   }
 
-  winston.info("diagnostics", {
+  winston.debug("diagnostics", {
     rssMb: Math.round(mem.rss / 1024 / 1024),
     heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
     heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
