@@ -9,8 +9,6 @@ import type { WatchdogSigner } from "./wallet";
 import type { Provider, TransactionRequest } from "ethers";
 
 const FLOW_NAME = "transfer";
-const TRANSFER_RETRY_LIMIT = +(process.env.FLOW_TRANSFER_RETRY_LIMIT ?? 5);
-const TRANSFER_RETRY_INTERVAL = +(process.env.FLOW_TRANSFER_RETRY_INTERVAL ?? 5 * SEC);
 
 export class SimpleTxFlow extends BaseFlow {
   constructor(
@@ -89,17 +87,7 @@ export class SimpleTxFlow extends BaseFlow {
   public async run() {
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      for (let i = 0; i < TRANSFER_RETRY_LIMIT; i++) {
-        const result = await this.l2WalletLock.withLock(() => this.step());
-        if (result === StatusNoSkip.OK) {
-          this.logger.info(`attempt ${i + 1} succeeded`);
-          break;
-        } else {
-          this.logger.error(`attempt ${i + 1} failed`);
-        }
-        await timeoutPromise(TRANSFER_RETRY_INTERVAL);
-      }
-      //sleep
+      await this.l2WalletLock.withLock(() => this.step());
       await nextExecutionWait;
     }
   }
