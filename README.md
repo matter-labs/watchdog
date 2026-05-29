@@ -91,7 +91,6 @@ Performs a 1 wei transaction on L2 (uses paymaster if configured).
 Options:
 - `FLOW_TRANSFER_ENABLE` -- set to `1` to enable
 - `FLOW_TRANSFER_INTERVAL` -- interval in ms (default: 1 minute)
-- `FLOW_TRANSFER_EXECUTION_TIMEOUT` -- timeout of l2 transfer confirmation in ms
 
 ### Deposit
 
