@@ -92,8 +92,6 @@ Options:
 - `FLOW_TRANSFER_ENABLE` -- set to `1` to enable
 - `FLOW_TRANSFER_INTERVAL` -- interval in ms
 - `FLOW_TRANSFER_EXECUTION_TIMEOUT` -- timeout of l2 transfer confirmation in ms
-- `FLOW_TRANSFER_RETRY_LIMIT` -- retry limit (default to 5)
-- `FLOW_TRANSFER_RETRY_INTERVAL` -- retry interval in ms (default to 5 seconds)
 
 ### Deposit
 
