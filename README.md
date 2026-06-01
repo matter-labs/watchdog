@@ -99,7 +99,7 @@ Deposits 1 wei of base token from L1 to L2. Waits for execution on L2.
 Options:
 - `FLOW_DEPOSIT_ENABLE` -- set to `1` to enable
 - `FLOW_DEPOSIT_INTERVAL` -- interval in ms (default: 1 hour)
-- `FLOW_DEPOSIT_RETRY_INTERVAL` -- retry interval in ms (default to 5 minutes)
+- `FLOW_DEPOSIT_RETRY_INTERVAL` -- retry interval in ms (default: 30 seconds)
 - `FLOW_DEPOSIT_RETRY_LIMIT` -- retry limit (default to 3)
 - `FLOW_DEPOSIT_L2_TIMEOUT` -- timeout of l2 deposit confirmation in ms
 - `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI` -- gas price limit in gwei for l1 deposit transaction.
