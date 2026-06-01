@@ -4,7 +4,7 @@ import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
 
 import { L2_EXECUTION_TIMEOUT } from "./configs";
 import { StatusNoSkip } from "./flowMetric";
-import { SEC, unwrap, timeoutPromise } from "./utils";
+import { MIN, SEC, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
@@ -14,16 +14,16 @@ import type { WithdrawParams } from "@matterlabs/zksync-js/core";
 import type { EthersSdk } from "@matterlabs/zksync-js/ethers/sdk";
 
 const FLOW_NAME = "withdrawal";
+const WITHDRAWAL_INTERVAL = +(process.env.FLOW_WITHDRAWAL_INTERVAL ?? 10 * MIN);
 
 export class WithdrawalFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: WatchdogSigner,
     private l2WalletLock: Mutex,
-    intervalMs: number,
     private sdk: EthersSdk,
     private receiptStore: WithdrawalReceiptStore
   ) {
-    super(wallet, FLOW_NAME, intervalMs);
+    super(wallet, FLOW_NAME, WITHDRAWAL_INTERVAL);
   }
 
   protected async executeWatchdogWithdrawal(): Promise<StatusNoSkip> {

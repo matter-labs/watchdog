@@ -128,7 +128,7 @@ Withdraws 1 wei from L2 to L1 (does not finalize).
 
 Options:
 - `FLOW_WITHDRAWAL_ENABLE` -- set to `1` to enable
-- `FLOW_WITHDRAWAL_INTERVAL` -- interval in ms
+- `FLOW_WITHDRAWAL_INTERVAL` -- interval in ms (default: 10 minutes)
 
 ### Withdrawal Finalize
 
