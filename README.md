@@ -149,11 +149,11 @@ Options:
 This flow is used to ensure timely L1 settlement.
 Every second it evaluates the age of the oldest unsettled (also known as unexecuted on L1) L2 block.
 This age is measured against the newest L1 block (that is, not local clock time or newest L2 block).
-If it's older than `SETTLEMENT_DEADLINE` (1 hour by default), the flow is considered failed.
+If it's older than `FLOW_SETTLEMENT_DEADLINE` (1 hour by default), the flow is considered failed.
 
 Options:
 - `FLOW_SETTLEMENT_ENABLE` -- set to `1` to enable 
-- `SETTLEMENT_DEADLINE` -- acceptable settlement delay in ms (defaults to 1 hour)
+- `FLOW_SETTLEMENT_DEADLINE` -- acceptable settlement delay in ms (defaults to 1 hour)
 - `FLOW_SETTLEMENT_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
 
 ### Prividium
