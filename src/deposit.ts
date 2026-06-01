@@ -24,6 +24,7 @@ import type { JsonRpcProvider } from "ethers";
 type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
 
 const FLOW_NAME = "deposit";
+const DEPOSIT_INTERVAL = +(process.env.FLOW_DEPOSIT_INTERVAL ?? 60 * MIN);
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
 const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
 const DEFAULT_FEE_BUMP_PERCENT = 10;
@@ -46,10 +47,9 @@ export class DepositFlow extends DepositBaseFlow {
   constructor(
     wallet: WatchdogSigner,
     client: EthersClient,
-    private sdk: EthersSdk,
-    intervalMs: number
+    private sdk: EthersSdk
   ) {
-    super(wallet, client, FLOW_NAME, intervalMs);
+    super(wallet, client, FLOW_NAME, DEPOSIT_INTERVAL);
   }
 
   private getMinPriorityFeePerGas(depositPriorityFee: bigint | null = null): bigint {

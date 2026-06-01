@@ -126,8 +126,7 @@ const main = async () => {
     new DepositFlow(
       l2Wallet,
       getClient(),
-      getSdk(),
-      +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")
+      getSdk()
     ).runWithRestart();
     enabledFlows++;
   }
