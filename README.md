@@ -108,7 +108,7 @@ Options:
   watchdog deposit transactions (default: `0.001`)
 - `FLOW_DEPOSIT_FEE_BUMP_PERCENT` -- percentage to increase both `maxFeePerGas` and
   `maxPriorityFeePerGas` when a deposit transaction is rejected as underpriced (default: `10`)
-- `MAX_LOGS_BLOCKS` -- max number of blocks in range of `eth_getLogs` request
+- `FLOW_DEPOSIT_MAX_LOGS_BLOCKS` -- max L1 block range for scanning recent deposit events on startup (default: 9000)
 
 ### Deposit User
 
@@ -118,7 +118,7 @@ Options:
 - `FLOW_DEPOSIT_USER_INTERVAL` -- interval in ms (frequency of quaring latest deposit)
 - `FLOW_DEPOSIT_USER_TX_TRIGGER_DELAY` -- max age of user transaction to consider. If exceeded
   watchdog will trigger deposit transaction from watchdog wallet
-- `FLOW_DEPOSIT_L2_TIMEOUT`, `MAX_LOGS_BLOCKS`, `FLOW_DEPOSIT_RETRY_INTERVAL`,
+- `FLOW_DEPOSIT_L2_TIMEOUT`, `FLOW_DEPOSIT_MAX_LOGS_BLOCKS`, `FLOW_DEPOSIT_RETRY_INTERVAL`,
   `FLOW_DEPOSIT_RETRY_LIMIT`, `FLOW_DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI`,
   `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` shared with deposit flow
 
@@ -129,6 +129,7 @@ Withdraws 1 wei from L2 to L1 (does not finalize).
 Options:
 - `FLOW_WITHDRAWAL_ENABLE` -- set to `1` to enable
 - `FLOW_WITHDRAWAL_INTERVAL` -- interval in ms (default: 10 minutes)
+- `FLOW_WITHDRAWAL_MAX_LOGS_BLOCKS` -- max L2 block range for scanning recent withdrawal events on startup (default: 1000)
 
 ### Withdrawal Finalize
 

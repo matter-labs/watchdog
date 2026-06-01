@@ -70,14 +70,14 @@ export abstract class WithdrawalBaseFlow extends BaseFlow {
     wallet: string | undefined
   ): Promise<ExecutionResult> {
     // early return if we intended to disable this functionality
-    if (process.env.MAX_LOGS_BLOCKS_L2 == "0") return null;
+    if (process.env.FLOW_WITHDRAWAL_MAX_LOGS_BLOCKS == "0") return null;
     const topBlock = await this.wallet.provider!.getBlock(blockType);
     const topBlockNumber = topBlock!.number;
 
     const events = await this.wallet.provider!.getLogs({
       address: L2_BASE_TOKEN_ADDRESS,
       topics: getWithdrawalLogsTopicsFilter(wallet),
-      fromBlock: Math.max(0, topBlockNumber - +(process.env.MAX_LOGS_BLOCKS_L2 ?? 50 * 1000)),
+      fromBlock: Math.max(0, topBlockNumber - +(process.env.FLOW_WITHDRAWAL_MAX_LOGS_BLOCKS ?? 1000)),
       toBlock: topBlockNumber,
     });
 

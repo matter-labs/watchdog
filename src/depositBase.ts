@@ -78,7 +78,7 @@ export abstract class DepositBaseFlow extends BaseFlow {
     const events = await this.client.l1.getLogs({
       address: await this.sharedBridge.getAddress(),
       topics: topicFilter,
-      fromBlock: Math.max(topBlock - +(process.env.MAX_LOGS_BLOCKS ?? 50 * 1000), 0),
+      fromBlock: Math.max(topBlock - +(process.env.FLOW_DEPOSIT_MAX_LOGS_BLOCKS ?? 9000), 0),
       toBlock: topBlock,
     });
     events.sort((a, b) => b.blockNumber - a.blockNumber);
