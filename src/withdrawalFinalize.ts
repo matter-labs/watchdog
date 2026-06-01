@@ -12,7 +12,7 @@ import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 
 const FLOW_NAME = "withdrawalFinalize";
-const FINALIZE_INTERVAL = +(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL ?? 15 * MIN);
+const FINALIZE_INTERVAL = +(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL ?? 30 * SEC);
 
 export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   private metricTimeSinceLastFinalizableWithdrawal: Gauge;
