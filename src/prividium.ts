@@ -1,21 +1,21 @@
 import { BaseFlow } from "./baseFlow";
 import { runSiweFlow } from "./prividiumAuth";
-import { SEC, timeoutPromise } from "./utils";
+import { MIN, SEC, timeoutPromise } from "./utils";
 
 import type { PrividiumTokenStore } from "./prividiumAuth";
 import type { Signer } from "ethers";
 
 const FLOW_NAME = "prividium";
+const PRIVIDIUM_INTERVAL = +(process.env.FLOW_PRIVIDIUM_INTERVAL ?? 10 * MIN);
 
 export class PrividiumFlow extends BaseFlow {
   constructor(
     private signer: Signer,
     private domain: string,
     private apiUrl: string,
-    intervalMs: number,
     private tokenStore: PrividiumTokenStore
   ) {
-    super(FLOW_NAME, intervalMs);
+    super(FLOW_NAME, PRIVIDIUM_INTERVAL);
   }
 
   public async run() {

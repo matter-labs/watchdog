@@ -58,12 +58,10 @@ const main = async () => {
     l2Provider.setAuthTokenGetter(() => prividiumTokenStore.token);
 
     // Prividium flow (refreshes auth token and records metrics)
-    const prividiumIntervalMs = +(process.env.FLOW_PRIVIDIUM_INTERVAL ?? SEC);
     new PrividiumFlow(
       wallet,
       prividiumDomain,
       prividiumApiUrl,
-      prividiumIntervalMs,
       prividiumTokenStore
     ).runWithRestart();
     enabledFlows++;

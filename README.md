@@ -166,7 +166,7 @@ Options:
 - `FLOW_PRIVIDIUM_ENABLE` -- set to `1` to enable
 - `FLOW_PRIVIDIUM_DOMAIN` -- Domain for the SIWE message (e.g., `user-panel.testnet-prividium.zksync.dev`)
 - `FLOW_PRIVIDIUM_API_URL` -- Base URL of the Prividium permissions API (e.g., `https://permissions-api.testnet-prividium.zksync.dev`). The flow appends `/api/siwe-messages` and `/api/auth/login/crypto-native` automatically.
-- `FLOW_PRIVIDIUM_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
+- `FLOW_PRIVIDIUM_INTERVAL` -- interval in ms (default: 10 minutes)
 
 #### Permissions:
 Some flows require specific permissions to be granted to the watchdog address. Make sure to configure them for the flow to work:
