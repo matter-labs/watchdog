@@ -32,8 +32,6 @@ export class SettlementFlow extends BaseFlow {
       try {
         this.metricRecorder.recordFlowStart();
 
-        let settlementAgeSec = 0;
-
         await this.metricRecorder.stepExecution({
           stepName: "settlement",
           stepTimeoutMs: 10 * SEC,
@@ -49,37 +47,38 @@ export class SettlementFlow extends BaseFlow {
             // Check if there's a first unsettled block (settled + 1)
             const firstUnsettledBlock = await this.l2Provider.getBlock(lastSettledBlock.number + 1);
 
-            if (firstUnsettledBlock) {
-              // There is an unsettled block
-              this.logger.debug(
-                `Found unsettled block ${firstUnsettledBlock.number} with timestamp ${firstUnsettledBlock.timestamp}`
-              );
-
-              // Get the latest L1 block
-              const l1Block = await this.l1Provider.getBlock("latest");
-              if (!l1Block) {
-                throw new Error("Failed to get L1 block");
-              }
-
-              this.logger.debug(`L1 latest block timestamp: ${l1Block.timestamp}`);
-
-              // Calculate the settlement age
-              settlementAgeSec = l1Block.timestamp - firstUnsettledBlock.timestamp;
-              this.logger.debug(`Settlement age: ${settlementAgeSec} seconds`);
-
-              // Record the metric
-              this.metricSettlementAge.set(settlementAgeSec);
-
-              // Check if it exceeds the deadline
-              if (settlementAgeSec * SEC > this.settlementDeadline) {
-                throw new Error(
-                  `Settlement age ${settlementAgeSec}s exceeds deadline ${this.settlementDeadline / 1000}s`
-                );
-              }
-            } else {
+            if (!firstUnsettledBlock) {
               // No unsettled blocks
               this.logger.debug("No unsettled blocks found");
               this.metricSettlementAge.set(0);
+              return;
+            }
+
+            // There is an unsettled block
+            this.logger.debug(
+              `Found unsettled block ${firstUnsettledBlock.number} with timestamp ${firstUnsettledBlock.timestamp}`
+            );
+
+            // Get the latest L1 block
+            const l1Block = await this.l1Provider.getBlock("latest");
+            if (!l1Block) {
+              throw new Error("Failed to get L1 block");
+            }
+
+            this.logger.debug(`L1 latest block timestamp: ${l1Block.timestamp}`);
+
+            // Calculate the settlement age
+            const settlementAgeSec = l1Block.timestamp - firstUnsettledBlock.timestamp;
+            this.logger.debug(`Settlement age: ${settlementAgeSec} seconds`);
+
+            // Record the metric
+            this.metricSettlementAge.set(settlementAgeSec);
+
+            // Check if it exceeds the deadline
+            if (settlementAgeSec * SEC > this.settlementDeadline) {
+              throw new Error(
+                `Settlement age ${settlementAgeSec}s exceeds deadline ${this.settlementDeadline / 1000}s`
+              );
             }
           },
         });
