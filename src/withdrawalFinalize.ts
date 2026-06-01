@@ -22,10 +22,9 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   constructor(
     wallet: WatchdogSigner,
     private client: EthersClient,
-    intervalMs: number = FINALIZE_INTERVAL,
     private receiptStore: WithdrawalReceiptStore
   ) {
-    super(wallet, FLOW_NAME, intervalMs);
+    super(wallet, FLOW_NAME, FINALIZE_INTERVAL);
     this.finalizationService = createFinalizationServices(this.client);
     this.metricTimeSinceLastFinalizableWithdrawal = new Gauge({
       name: "watchdog_time_since_last_finalizable_withdrawal",

@@ -149,7 +149,6 @@ const main = async () => {
     new WithdrawalFinalizeFlow(
       l2Wallet,
       getClient(),
-      +unwrap(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL, "FLOW_WITHDRAWAL_FINALIZE_INTERVAL"),
       withdrawalReceiptStore
     ).runWithRestart();
     enabledFlows++;
