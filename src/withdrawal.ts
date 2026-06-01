@@ -5,7 +5,7 @@ import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
 import { L2_EXECUTION_TIMEOUT } from "./configs";
 import { StatusNoSkip } from "./flowMetric";
 import { SEC, unwrap, timeoutPromise } from "./utils";
-import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
+import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
 import type { WatchdogSigner } from "./wallet";
@@ -106,21 +106,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     }
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      for (let i = 0; i < WITHDRAWAL_RETRY_LIMIT; i++) {
-        const result = await this.l2WalletLock.withLock(() => this.executeWatchdogWithdrawal());
-        if (result === StatusNoSkip.FAIL) {
-          this.logger.warn(
-            `attempt ${i + 1} of ${WITHDRAWAL_RETRY_LIMIT} failed` +
-              (i + 1 != WITHDRAWAL_RETRY_LIMIT
-                ? `, retrying in ${(WITHDRAWAL_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
-                : "")
-          );
-          await timeoutPromise(WITHDRAWAL_RETRY_INTERVAL);
-        } else {
-          this.logger.info(`attempt ${i + 1} succeeded`);
-          break;
-        }
-      }
+      await this.l2WalletLock.withLock(() => this.executeWatchdogWithdrawal());
       await nextExecutionWait;
     }
   }

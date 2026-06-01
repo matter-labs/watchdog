@@ -3,7 +3,7 @@ import { L2_BASE_TOKEN_ADDRESS } from "@matterlabs/zksync-js/core";
 import { getAddress, id, zeroPadValue } from "ethers";
 
 import { BaseFlow } from "./baseFlow";
-import { SEC, unwrap } from "./utils";
+import { unwrap } from "./utils";
 
 import type { WatchdogSigner } from "./wallet";
 import type { TransactionReceipt } from "ethers";
@@ -49,9 +49,6 @@ export const STEPS = {
   get_finalization_params: "get_finalization_params",
   l1_simulation: "l1_simulation",
 };
-
-export const WITHDRAWAL_RETRY_INTERVAL = +(process.env.FLOW_WITHDRAWAL_RETRY_INTERVAL ?? 30 * SEC);
-export const WITHDRAWAL_RETRY_LIMIT = +(process.env.FLOW_WITHDRAWAL_RETRY_LIMIT ?? 10);
 
 function getWithdrawalLogsTopicsFilter(wallet: string | undefined) {
   const walletTopic = wallet ? zeroPadValue(getAddress(wallet), 32) : null;
