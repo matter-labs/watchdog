@@ -4,7 +4,7 @@ import { id, Contract } from "ethers";
 
 import { BaseFlow } from "./baseFlow";
 import { StatusNoSkip } from "./flowMetric";
-import { MIN, SEC, unwrap } from "./utils";
+import { MIN, unwrap } from "./utils";
 
 import type { WatchdogSigner } from "./wallet";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
@@ -41,8 +41,6 @@ export const STEPS = {
 };
 
 export const PRIORITY_OP_TIMEOUT = +(process.env.FLOW_DEPOSIT_L2_TIMEOUT ?? 15 * MIN);
-export const DEPOSIT_RETRY_INTERVAL = +(process.env.FLOW_DEPOSIT_RETRY_INTERVAL ?? 30 * SEC);
-export const DEPOSIT_RETRY_LIMIT = +(process.env.FLOW_DEPOSIT_RETRY_LIMIT ?? 3);
 
 const GWEI = 1000n * 1000n * 1000n;
 /// We avoid L1 transactions if gas price is higher than this limit

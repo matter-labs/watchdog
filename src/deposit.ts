@@ -6,8 +6,6 @@ import { formatEther, formatUnits, MaxInt256, parseEther, parseUnits } from "eth
 
 import {
   DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI,
-  DEPOSIT_RETRY_INTERVAL,
-  DEPOSIT_RETRY_LIMIT,
   DepositBaseFlow,
   PRIORITY_OP_TIMEOUT,
   STEPS,
@@ -251,34 +249,7 @@ export class DepositFlow extends DepositBaseFlow {
 
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
-      let attempt: number = 1;
-      while (attempt <= DEPOSIT_RETRY_LIMIT) {
-        const result = await this.executeWatchdogDeposit();
-        switch (result) {
-          case Status.OK:
-            this.logger.info(`attempt ${attempt} succeeded`);
-            break;
-          case Status.SKIP:
-            this.logger.info(`attempt ${attempt} skipped (not counted towards limit)`);
-            break;
-          case Status.FAIL: {
-            this.logger.warn(
-              `[deposit] attempt ${attempt} of ${DEPOSIT_RETRY_LIMIT} failed` +
-                (attempt < DEPOSIT_RETRY_LIMIT
-                  ? `, retrying in ${(DEPOSIT_RETRY_INTERVAL / 1000).toFixed(0)} seconds`
-                  : "")
-            );
-            attempt++;
-            await timeoutPromise(DEPOSIT_RETRY_INTERVAL);
-            break;
-          }
-          default: {
-            const _exhaustiveCheck: never = result;
-            throw new Error(`Unreachable code branch: ${_exhaustiveCheck}`);
-          }
-        }
-        if (result === Status.OK || result === Status.SKIP) break;
-      }
+      await this.executeWatchdogDeposit();
       await nextExecutionWait;
     }
   }
