@@ -3,6 +3,12 @@ import winston from "winston";
 
 import type { JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
 
+const npmLevels = winston.config.npm.levels;
+/** Whether the default winston logger would actually emit at `level`. */
+const levelEnabled = (level: string): boolean => npmLevels[level] <= npmLevels[winston.level ?? "info"];
+
+const bigintReplacer = (_: string, value: unknown): unknown => (typeof value === "bigint" ? value.toString() : value);
+
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
 export type AuthTokenGetter = () => string | null;
 
@@ -46,13 +52,13 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
       const id = this.requestId++;
       const self = this as typeof this & { getAuthToken?: AuthTokenGetter };
 
-      winston.debug(`[JSON-RPC Request] ID: ${id} Method: ${method}`, {
-        rpcRequest: {
-          id,
-          method,
-          params: JSON.stringify(params, (_, value) => (typeof value === "bigint" ? value.toString() : value)),
-        },
-      });
+      // Guard the JSON.stringify: it runs on every RPC call and is otherwise
+      // discarded by the level filter (prod runs at "info").
+      if (levelEnabled("debug")) {
+        winston.debug(`[JSON-RPC Request] ID: ${id} Method: ${method}`, {
+          rpcRequest: { id, method, params: JSON.stringify(params, bigintReplacer) },
+        });
+      }
 
       const startTime = Date.now();
       try {
@@ -74,14 +80,13 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
             method,
           },
         });
-        // Log the full response result at a lower level to avoid cluttering logs, but still have it available for debugging when needed
-        winston.silly(`[JSON-RPC Response Result] ID: ${id} Method: ${method}`, {
-          rpcResponse: {
-            id,
-            method,
-            result: JSON.stringify(result, (_, value) => (typeof value === "bigint" ? value.toString() : value)),
-          },
-        });
+        // Log the full response result at a lower level to avoid cluttering logs, but still have it available for debugging when needed.
+        // Stringifying every response is expensive (large RPC results), so only do it when silly logging is actually enabled.
+        if (levelEnabled("silly")) {
+          winston.silly(`[JSON-RPC Response Result] ID: ${id} Method: ${method}`, {
+            rpcResponse: { id, method, result: JSON.stringify(result, bigintReplacer) },
+          });
+        }
 
         return result;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,43 +117,67 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         return this.getTransactionReceipt(hash);
       }
 
-      return new Promise((resolve, reject) => {
-        let timer: null | NodeJS.Timeout = null;
+      let timer: null | NodeJS.Timeout = null;
+      let timedOut = false;
+      const failIfTimedOut = () => {
+        if (timedOut) {
+          throw new Error("timeout");
+        }
+      };
 
-        const listener = async (receipt: TransactionReceipt) => {
+      const pollLoop = async (): Promise<null | TransactionReceipt> => {
+        const pollMs = this.pollingInterval;
+        while (true) {
+          failIfTimedOut();
           try {
-            if ((await receipt.confirmations()) >= confirms) {
-              resolve(receipt);
-              if (timer) {
-                clearTimeout(timer);
-                timer = null;
+            // Cheap inclusion probe: the raw JSON-RPC result is not parsed into ethers
+            // objects, so no per-log address checksumming (keccak256) happens while
+            // polling. The receipt is only formatted once, after it is confirmed.
+            const raw = (await this.send("eth_getTransactionReceipt", [hash])) as { blockNumber?: string } | null;
+            failIfTimedOut();
+            if (raw?.blockNumber != null) {
+              if (confirms <= 1) {
+                const receipt = await this.getTransactionReceipt(hash);
+                failIfTimedOut();
+                return receipt;
               }
-            } else {
-              await this.once(hash, listener);
+              const current = await this.getBlockNumber();
+              failIfTimedOut();
+              if (current - Number(raw.blockNumber) + 1 >= confirms) {
+                const receipt = await this.getTransactionReceipt(hash);
+                failIfTimedOut();
+                return receipt;
+              }
             }
           } catch (error) {
+            if (timedOut) {
+              throw error;
+            }
             winston.error("Error in waitForTransaction", error);
-            if (timer) {
-              clearTimeout(timer);
-              timer = null;
-            }
-            reject(error);
           }
-        };
-
-        if (timeout != null) {
-          timer = setTimeout(() => {
-            if (timer == null) {
-              return;
-            }
-            timer = null;
-            this.off(hash, listener);
-            reject(new Error("timeout"));
-          }, timeout);
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
         }
+      };
 
-        this.once(hash, listener);
+      if (timeout == null) {
+        return pollLoop();
+      }
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error("timeout"));
+        }, timeout);
       });
+
+      try {
+        return await Promise.race([pollLoop(), timeoutPromise]);
+      } finally {
+        timedOut = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+      }
     }
   };
 };

@@ -69,7 +69,7 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `CHAIN_L1_RPC_URL`: L1 JSON-RPC endpoint
 - `L2_POLLING_INTERVAL`: L2 provider polling interval in ms (default: `100`)
 - `L1_POLLING_INTERVAL`: L1 provider polling interval in ms (default: ethers.js default, currenly 4 sec)
-- `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 15 seconds)
+- `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 3 seconds)
 - `FLOW_CRASH_RESTART_INTERVAL`: How long to wait before restarting a flow after an unexpected error in ms (default: `10000`). The actual restart delay is `min(FLOW_CRASH_RESTART_INTERVAL, <flow interval>)` to avoid unnecessarily long waits for flows with large intervals (e.g. withdrawal).
 
 ### Flow-specific options
@@ -90,10 +90,7 @@ Performs a 1 wei transaction on L2 (uses paymaster if configured).
 
 Options:
 - `FLOW_TRANSFER_ENABLE` -- set to `1` to enable
-- `FLOW_TRANSFER_INTERVAL` -- interval in ms
-- `FLOW_TRANSFER_EXECUTION_TIMEOUT` -- timeout of l2 transfer confirmation in ms
-- `FLOW_TRANSFER_RETRY_LIMIT` -- retry limit (default to 5)
-- `FLOW_TRANSFER_RETRY_INTERVAL` -- retry interval in ms (default to 5 seconds)
+- `FLOW_TRANSFER_INTERVAL` -- interval in ms (default: 1 minute)
 
 ### Deposit
 
@@ -109,6 +106,8 @@ Options:
   If its exceeded in **estimation** the flow will skip
 - `FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI` -- minimum L1 `maxPriorityFeePerGas` to use for
   watchdog deposit transactions (default: `0.001`)
+- `FLOW_DEPOSIT_FEE_BUMP_PERCENT` -- percentage to increase both `maxFeePerGas` and
+  `maxPriorityFeePerGas` when a deposit transaction is rejected as underpriced (default: `10`)
 - `MAX_LOGS_BLOCKS` -- max number of blocks in range of `eth_getLogs` request
 
 ### Deposit User
