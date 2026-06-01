@@ -58,12 +58,7 @@ const main = async () => {
     l2Provider.setAuthTokenGetter(() => prividiumTokenStore.token);
 
     // Prividium flow (refreshes auth token and records metrics)
-    new PrividiumFlow(
-      wallet,
-      prividiumDomain,
-      prividiumApiUrl,
-      prividiumTokenStore
-    ).runWithRestart();
+    new PrividiumFlow(wallet, prividiumDomain, prividiumApiUrl, prividiumTokenStore).runWithRestart();
     enabledFlows++;
   }
 
@@ -121,32 +116,19 @@ const main = async () => {
   }
 
   if (process.env.FLOW_DEPOSIT_ENABLE === "1") {
-    new DepositFlow(
-      l2Wallet,
-      getClient(),
-      getSdk()
-    ).runWithRestart();
+    new DepositFlow(l2Wallet, getClient(), getSdk()).runWithRestart();
     enabledFlows++;
   }
 
   const withdrawalReceiptStore = new WithdrawalReceiptStore();
 
   if (process.env.FLOW_WITHDRAWAL_ENABLE === "1") {
-    new WithdrawalFlow(
-      l2Wallet,
-      l2WalletLock,
-      getSdk(),
-      withdrawalReceiptStore
-    ).runWithRestart();
+    new WithdrawalFlow(l2Wallet, l2WalletLock, getSdk(), withdrawalReceiptStore).runWithRestart();
     enabledFlows++;
   }
 
   if (process.env.FLOW_WITHDRAWAL_FINALIZE_ENABLE === "1") {
-    new WithdrawalFinalizeFlow(
-      l2Wallet,
-      getClient(),
-      withdrawalReceiptStore
-    ).runWithRestart();
+    new WithdrawalFinalizeFlow(l2Wallet, getClient(), withdrawalReceiptStore).runWithRestart();
     enabledFlows++;
   }
 

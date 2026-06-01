@@ -69,7 +69,9 @@ export class SettlementFlow extends BaseFlow {
 
             // Calculate the settlement age
             const settlementAgeSec = l1Block.timestamp - firstUnsettledBlock.timestamp;
-            this.logger.debug(`Settlement age: ${settlementAgeSec} seconds (threshold: ${this.settlementDeadline / SEC} seconds)`);
+            this.logger.debug(
+              `Settlement age: ${settlementAgeSec} seconds (threshold: ${this.settlementDeadline / SEC} seconds)`
+            );
 
             // Record the metric
             this.metricSettlementAge.set(settlementAgeSec);
