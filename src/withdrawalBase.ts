@@ -30,15 +30,12 @@ export class WithdrawalReceiptStore {
     }
   }
 
-  getLatestFinalized(finalizedBlockNumber: number | null | undefined): ExecutionResultKnown | null {
-    if (finalizedBlockNumber != null) {
-      for (let i = this.entries.length - 1; i >= 0; i--) {
-        if (this.entries[i].l2Receipt.blockNumber <= finalizedBlockNumber) {
-          return this.entries[i];
-        }
-      }
-    }
-    return null;
+  /// Returns stored withdrawals that are in finalized blocks, newest first. Block finality alone doesn't
+  /// guarantee a withdrawal is finalizable (its proof may not be available yet), so callers should pick
+  /// the first candidate that passes an on-chain readiness check.
+  getFinalizeCandidates(finalizedBlockNumber: number | null | undefined): ExecutionResultKnown[] {
+    if (finalizedBlockNumber == null) return [];
+    return this.entries.filter((entry) => entry.l2Receipt.blockNumber <= finalizedBlockNumber).reverse();
   }
 }
 
