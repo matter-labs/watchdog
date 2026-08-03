@@ -42,6 +42,7 @@ export const setupLogger = (environment: string | undefined, logLevel: string | 
 
   winston.configure({
     level: logLevel || defaultLogLevel,
+    format: format.errors({ stack: true }),
     transports: [
       new transports.Console({
         format: format.combine(...loggerFormatters),
