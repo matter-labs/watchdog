@@ -46,10 +46,11 @@ export class SimpleTxFlow extends BaseFlow {
             ...tx,
             nonce: latestNonce,
           });
-          const gasPrice = unwrap(populated.maxFeePerGas || populated.gasPrice);
+          const gasPrice = unwrap(populated.maxFeePerGas ?? populated.gasPrice, "populated transaction gas price");
+          const gasLimit = unwrap(populated.gasLimit, "populated transaction gas limit");
           recordStepGasPrice(gasPrice);
-          recordStepGas(unwrap(populated.gasLimit));
-          recordStepGasCost(BigInt(unwrap(populated.gasLimit)) * BigInt(gasPrice));
+          recordStepGas(gasLimit);
+          recordStepGasCost(BigInt(gasLimit) * BigInt(gasPrice));
           return populated;
         },
       });
@@ -66,10 +67,12 @@ export class SimpleTxFlow extends BaseFlow {
         stepName: "execution",
         stepTimeoutMs: L2_EXECUTION_TIMEOUT,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const receipt = unwrap(await this.provider.waitForTransaction(txResponse.hash, 1));
-          recordStepGas(unwrap(receipt.gasUsed));
-          recordStepGasPrice(unwrap(receipt.gasPrice));
-          recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));
+          const receipt = unwrap(await this.provider.waitForTransaction(txResponse.hash, 1), "transaction receipt");
+          const gasUsed = unwrap(receipt.gasUsed, "transaction receipt gas used");
+          const gasPrice = unwrap(receipt.gasPrice, "transaction receipt gas price");
+          recordStepGas(gasUsed);
+          recordStepGasPrice(gasPrice);
+          recordStepGasCost(BigInt(gasUsed) * BigInt(gasPrice));
           return receipt;
         },
       });
