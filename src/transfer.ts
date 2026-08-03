@@ -79,9 +79,9 @@ export class SimpleTxFlow extends BaseFlow {
 
       this.metricRecorder.recordFlowSuccess();
       return StatusNoSkip.OK;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
-      this.logger.error("simple tx error: " + error?.message, error?.stack);
+    } catch (error: unknown) {
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      this.logger.error("simple tx error:", normalizedError);
       this.metricRecorder.recordFlowFailure();
       return StatusNoSkip.FAIL;
     }
