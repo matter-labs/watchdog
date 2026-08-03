@@ -125,7 +125,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         }
       };
 
-      const pollLoop = async (): Promise<null | TransactionReceipt> => {
+      const pollLoop = async (): Promise<TransactionReceipt> => {
         const pollMs = this.pollingInterval;
         while (true) {
           failIfTimedOut();
@@ -139,14 +139,22 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
               if (confirms <= 1) {
                 const receipt = await this.getTransactionReceipt(hash);
                 failIfTimedOut();
-                return receipt;
-              }
-              const current = await this.getBlockNumber();
-              failIfTimedOut();
-              if (current - Number(raw.blockNumber) + 1 >= confirms) {
-                const receipt = await this.getTransactionReceipt(hash);
+                // The formatting fetch may hit a different RPC replica than the
+                // raw inclusion probe. Keep polling if that replica has not seen
+                // the receipt yet.
+                if (receipt != null) {
+                  return receipt;
+                }
+              } else {
+                const current = await this.getBlockNumber();
                 failIfTimedOut();
-                return receipt;
+                if (current - Number(raw.blockNumber) + 1 >= confirms) {
+                  const receipt = await this.getTransactionReceipt(hash);
+                  failIfTimedOut();
+                  if (receipt != null) {
+                    return receipt;
+                  }
+                }
               }
             }
           } catch (error) {
