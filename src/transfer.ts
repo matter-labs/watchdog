@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { BaseFlow } from "./baseFlow";
-import { L2_EXECUTION_TIMEOUT } from "./configs";
+import { L2_BALANCE_TIMEOUT, L2_EXECUTION_TIMEOUT } from "./configs";
 import { recordL2BaseTokenBalance, StatusNoSkip } from "./flowMetric";
 import { SEC, timeoutPromise, unwrap } from "./utils";
 
@@ -32,7 +32,11 @@ export class SimpleTxFlow extends BaseFlow {
       this.metricRecorder.recordFlowStart();
 
       // Record L2 balance before each cycle
-      const l2Balance = await this.provider.getBalance(this.wallet.address);
+      const l2Balance = await this.metricRecorder.stepExecution({
+        stepName: "balance",
+        stepTimeoutMs: L2_BALANCE_TIMEOUT,
+        fn: () => this.provider.getBalance(this.wallet.address),
+      });
       recordL2BaseTokenBalance(l2Balance);
 
       // populate transaction

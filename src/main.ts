@@ -1,11 +1,11 @@
 import "dotenv/config";
 import { createEthersClient, createEthersSdk } from "@matterlabs/zksync-js/ethers";
-import { ethers, JsonRpcProvider } from "ethers";
+import { ethers, FetchRequest, JsonRpcProvider } from "ethers";
 import express from "express";
 import { collectDefaultMetrics, register } from "prom-client";
 import winston from "winston";
 
-import { SETTLEMENT_DEADLINE } from "./configs";
+import { L1_RPC_TIMEOUT, L2_RPC_TIMEOUT, SETTLEMENT_DEADLINE } from "./configs";
 import { DepositFlow } from "./deposit";
 import { recordWalletInfo } from "./flowMetric";
 import { Mutex } from "./lock";
@@ -34,6 +34,15 @@ function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProvide
   };
 }
 
+/**
+ * Connection for a provider with an explicit per-request timeout.
+ */
+function getRpcRequest(url: string, timeoutMs: number): FetchRequest {
+  const request = new FetchRequest(url);
+  request.timeout = timeoutMs;
+  return request;
+}
+
 const main = async () => {
   setupLogger(process.env.NODE_ENV, process.env.LOG_LEVEL);
   const l2PollingInterval = +(process.env.L2_POLLING_INTERVAL ?? 100);
@@ -41,7 +50,7 @@ const main = async () => {
   const wallet = await createWallet(walletKey);
   const l2Provider = new LoggingJsonRpcProvider(
     wallet.address,
-    unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"),
+    getRpcRequest(unwrap(process.env.CHAIN_RPC_URL, "CHAIN_RPC_URL"), L2_RPC_TIMEOUT),
     undefined,
     getProviderOptions({ pollingInterval: l2PollingInterval })
   );
@@ -76,16 +85,16 @@ const main = async () => {
   let _l1Provider: JsonRpcProvider | undefined;
   const getL1Provider = () => {
     if (!_l1Provider) {
-      const l1RpcUrl = unwrap(process.env.CHAIN_L1_RPC_URL, "CHAIN_L1_RPC_URL");
+      const l1RpcRequest = getRpcRequest(unwrap(process.env.CHAIN_L1_RPC_URL, "CHAIN_L1_RPC_URL"), L1_RPC_TIMEOUT);
       _l1Provider = process.env.L1_POLLING_INTERVAL
         ? new JsonRpcProvider(
-            l1RpcUrl,
+            l1RpcRequest,
             undefined,
             getProviderOptions({
               pollingInterval: +process.env.L1_POLLING_INTERVAL,
             })
           )
-        : new JsonRpcProvider(l1RpcUrl, undefined, getProviderOptions());
+        : new JsonRpcProvider(l1RpcRequest, undefined, getProviderOptions());
     }
     return _l1Provider;
   };
