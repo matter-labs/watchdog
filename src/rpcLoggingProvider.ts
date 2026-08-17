@@ -1,7 +1,7 @@
 import { JsonRpcProvider } from "ethers";
 import winston from "winston";
 
-import type { JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
+import type { FetchRequest, JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
 
 const npmLevels = winston.config.npm.levels;
 /** Whether the default winston logger would actually emit at `level`. */
@@ -20,9 +20,15 @@ class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   declare readonly walletAddress: string;
   getAuthToken?: AuthTokenGetter;
 
-  constructor(walletAdddress: string, url?: string, network?: Networkish, options?: JsonRpcApiProviderOptions) {
+  // `url` accepts a `FetchRequest` so callers can set a per-request timeout
+  constructor(
+    walletAdddress: string,
+    url?: string | FetchRequest,
+    network?: Networkish,
+    options?: JsonRpcApiProviderOptions
+  ) {
     super(url, network, options);
-    this.rpcUrl = url;
+    this.rpcUrl = typeof url === "string" ? url : url?.url;
     this.walletAddress = walletAdddress;
   }
 

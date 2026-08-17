@@ -70,6 +70,8 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `L2_POLLING_INTERVAL`: L2 provider polling interval in ms (default: `100`)
 - `L1_POLLING_INTERVAL`: L1 provider polling interval in ms (default: ethers.js default, currenly 4 sec)
 - `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 1 second)
+- `L2_RPC_TIMEOUT`: Per-request timeout for the L2 provider in ms (default: 5 seconds). Ethers' own default is 300 seconds, far longer than any flow interval — a request that never receives a response keeps its caller blocked for five minutes instead of failing fast.
+- `L1_RPC_TIMEOUT`: Per-request timeout for the L1 provider in ms (default: 5 seconds)
 - `FLOW_CRASH_RESTART_INTERVAL`: How long to wait before restarting a flow after an unexpected error in ms (default: `10000`). The actual restart delay is `min(FLOW_CRASH_RESTART_INTERVAL, <flow interval>)` to avoid unnecessarily long waits for flows with large intervals (e.g. withdrawal).
 
 ### Flow-specific options
@@ -91,6 +93,7 @@ Performs a 1 wei transaction on L2 (uses paymaster if configured).
 Options:
 - `FLOW_TRANSFER_ENABLE` -- set to `1` to enable
 - `FLOW_TRANSFER_INTERVAL` -- interval in ms (default: 1 minute)
+- `L2_BALANCE_TIMEOUT` -- timeout of the `balance` step in ms (default: 10 seconds)
 
 ### Deposit
 
