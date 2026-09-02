@@ -9,7 +9,7 @@ import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { WatchdogSigner } from "./wallet";
 import type { ExecutionResultKnown, WithdrawalReceiptStore } from "./withdrawalBase";
-import type { FinalizeDepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
+import type { WithdrawalFinalization, ZKsyncError } from "@matterlabs/zksync-js/core";
 import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 
 const FLOW_NAME = "withdrawalFinalize";
@@ -76,7 +76,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         this.metricRecorder.recordFlowSkipped();
         return Status.SKIP;
       }
-      const { execution, params } = finalizable;
+      const { execution, finalization } = finalizable;
       const withdrawalHash = execution.l2Receipt.hash;
 
       this.metricTimeSinceLastFinalizableWithdrawal.set(blockTimestamp - execution.timestampL2);
@@ -88,7 +88,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         stepName: STEPS.l1_simulation,
         stepTimeoutMs: 10 * SEC,
         fn: async ({ recordStepGas }) => {
-          const estimate = await this.finalizationService.estimateFinalization(params);
+          const estimate = await this.finalizationService.estimateFinalization(finalization);
           recordStepGas(estimate.gasLimit);
         },
       });
@@ -107,23 +107,23 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   /// Returns the first candidate (and its finalization params) that can actually be finalized on L1 right now.
   private async findFinalizableWithdrawal(
     candidates: ExecutionResultKnown[]
-  ): Promise<{ execution: ExecutionResultKnown; params: FinalizeDepositParams } | null> {
+  ): Promise<{ execution: ExecutionResultKnown; finalization: WithdrawalFinalization } | null> {
     for (const execution of candidates) {
       const withdrawalHash = execution.l2Receipt.hash;
 
-      let params: FinalizeDepositParams;
+      let finalization: WithdrawalFinalization;
       try {
-        ({ params } = await this.finalizationService.fetchFinalizeDepositParams(withdrawalHash as `0x${string}`));
+        ({ finalization } = await this.finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
       } catch (e) {
         if (!isProofNotAvailableError(e as ZKsyncError)) throw e;
         this.logger.info(`No finalization params for withdrawal ${withdrawalHash} yet: ${unwrap(e)}`);
         continue;
       }
 
-      const readiness = await this.finalizationService.simulateFinalizeReadiness(params);
+      const readiness = await this.finalizationService.simulateFinalizeReadiness(finalization);
       switch (readiness.kind) {
         case "READY":
-          return { execution, params };
+          return { execution, finalization };
         case "FINALIZED":
           this.logger.info(`Withdrawal ${withdrawalHash} is already finalized, trying an older one`);
           break;
