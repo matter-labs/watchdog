@@ -49,3 +49,6 @@ jobs:
       - name: Type check
         run: |
           yarn run typecheck
+
+      - name: Test
+        run: yarn test

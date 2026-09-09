@@ -14,7 +14,7 @@ import {
   getErc20Contract,
 } from "./depositBase";
 import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
-import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
+import { SEC, MIN, unwrap, timeoutPromise, withTimeout } from "./utils";
 
 import type { WatchdogSigner } from "./wallet";
 import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
@@ -125,16 +125,22 @@ export class DepositFlow extends DepositBaseFlow {
     try {
       // even before flow start we check base token allowance and perform an unlimited approval if needed
       if (this.baseToken != ETH_ADDRESS) {
-        const bridgeAddress = await this.sharedBridge.getAddress();
+        const { l1AssetRouter, l1NativeTokenVault } = await this.sdk.contracts.addresses();
         const erc20Contract = getErc20Contract(this.baseToken, this.client.l1, this.wallet);
-        const allowance = await erc20Contract.allowance(this.wallet.address, bridgeAddress);
+        // The vault pulls tokens on upgraded bridges. Keep the router approval as well:
+        // older bridges and the SDK's deposit planner still check its allowance.
+        for (const spender of new Set([l1AssetRouter, l1NativeTokenVault])) {
+          const allowance = await erc20Contract.allowance(this.wallet.address, spender);
 
-        // heuristic condition to determine if we should perform the infinite approval
-        if (allowance < parseEther("100000")) {
-          this.logger.info(`Approving base token ${this.baseToken} for infinite amount`);
-          await erc20Contract.approve(bridgeAddress, MaxInt256);
-        } else {
-          this.logger.info(`Base token ${this.baseToken} already has approval`);
+          // heuristic condition to determine if we should perform the infinite approval
+          if (allowance < parseEther("100000")) {
+            this.logger.info(`Approving base token ${this.baseToken} for infinite amount to ${spender}`);
+            const approval = await erc20Contract.approve(spender, MaxInt256);
+            // Deposits use the latest mined nonce, so confirm the approval first.
+            await withTimeout(approval.wait(1), 3 * MIN, `Base token approval for ${spender}`);
+          } else {
+            this.logger.info(`Base token ${this.baseToken} already has approval for ${spender}`);
+          }
         }
         const baseTokenBalance = await erc20Contract.balanceOf(this.wallet.address);
         this.logger.info(`L1 base token (${this.baseToken}) balance: ${formatEther(baseTokenBalance.toString())}`);
