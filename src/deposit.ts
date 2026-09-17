@@ -16,9 +16,10 @@ import {
 import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise, withTimeout } from "./utils";
 
+import type { SdkManager } from "./sdkManager";
 import type { WatchdogSigner } from "./wallet";
 import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
-import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
+import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
 type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
@@ -46,7 +47,7 @@ export class DepositFlow extends DepositBaseFlow {
   constructor(
     wallet: WatchdogSigner,
     client: EthersClient,
-    private sdk: EthersSdk,
+    private sdkManager: SdkManager,
     intervalMs: number
   ) {
     super(wallet, client, FLOW_NAME, intervalMs);
@@ -97,7 +98,7 @@ export class DepositFlow extends DepositBaseFlow {
         amount: 1n,
         refundRecipient: this.wallet.address,
       } as DepositParams;
-      const quote = await this.sdk.deposits.quote(quoteParams);
+      const quote = await this.sdkManager.get().deposits.quote(quoteParams);
       quoteMaxFee = quote.fees.l1!.maxFeePerGas;
       quotePriorityFee = quote.fees.l1!.maxPriorityFeePerGas || minPriorityFee;
     } catch (quoteErr: unknown) {
@@ -123,9 +124,10 @@ export class DepositFlow extends DepositBaseFlow {
 
   protected async executeWatchdogDeposit(): Promise<Status> {
     try {
+      const sdk = this.sdkManager.get();
       // even before flow start we check base token allowance and perform an unlimited approval if needed
       if (this.baseToken != ETH_ADDRESS) {
-        const { l1AssetRouter, l1NativeTokenVault } = await this.sdk.contracts.addresses();
+        const { l1AssetRouter, l1NativeTokenVault } = await sdk.contracts.addresses();
         const erc20Contract = getErc20Contract(this.baseToken, this.client.l1, this.wallet);
         // The vault pulls tokens on upgraded bridges. Keep the router approval as well:
         // older bridges and the SDK's deposit planner still check its allowance.
@@ -163,7 +165,7 @@ export class DepositFlow extends DepositBaseFlow {
             amount: 1n, // just 1 wei
             refundRecipient: this.wallet.address,
           } as DepositParams;
-          const depositQuote = await this.sdk.deposits.quote(params);
+          const depositQuote = await sdk.deposits.quote(params);
           recordStepGas(depositQuote.fees.l1!.gasLimit);
           recordStepGasPrice(depositQuote.fees.l1!.maxFeePerGas);
           recordStepGasCost(depositQuote.fees.l1!.maxTotal);
@@ -187,7 +189,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const depositHandle = await this.sdk.deposits.create({
+          const depositHandle = await sdk.deposits.create({
             ...deposit.params,
             l1TxOverrides: {
               nonce: "latest",
@@ -196,7 +198,7 @@ export class DepositFlow extends DepositBaseFlow {
               }),
             },
           } as DepositParams);
-          const txReceipt = await this.sdk.deposits.wait(depositHandle, { for: "l1" });
+          const txReceipt = await sdk.deposits.wait(depositHandle, { for: "l1" });
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));
           recordStepGasCost(unwrap(txReceipt?.gasUsed) * unwrap(txReceipt?.gasPrice));
@@ -214,7 +216,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l2_execution,
         stepTimeoutMs: PRIORITY_OP_TIMEOUT,
         fn: async ({ recordStepGasPrice, recordStepGas, recordStepGasCost }) => {
-          const receipt = unwrap(await this.sdk.deposits.wait(depositHandle, { for: "l2" }));
+          const receipt = unwrap(await sdk.deposits.wait(depositHandle, { for: "l2" }));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasCost(unwrap(receipt.gasUsed) * unwrap(receipt.gasPrice));
@@ -227,6 +229,7 @@ export class DepositFlow extends DepositBaseFlow {
       return Status.OK;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
+      this.sdkManager.reset();
       if (isUnderpricedError(error)) {
         this.feeOverride = await this.computeBumpedFees(error);
       } else {
@@ -239,7 +242,7 @@ export class DepositFlow extends DepositBaseFlow {
   }
 
   protected async run(): Promise<void> {
-    const { bridgehub, l1AssetRouter } = await this.sdk.contracts.instances();
+    const { bridgehub, l1AssetRouter } = await this.sdkManager.get().contracts.instances();
     this.chainId = (await this.wallet.provider!.getNetwork()).chainId;
     this.baseToken = await this.client.baseToken(this.chainId);
     this.zkChainAddress = await bridgehub.getHyperchain(this.chainId);

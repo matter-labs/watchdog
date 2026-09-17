@@ -8,10 +8,10 @@ import { SEC, unwrap, timeoutPromise } from "./utils";
 import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
+import type { SdkManager } from "./sdkManager";
 import type { WatchdogSigner } from "./wallet";
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawParams } from "@matterlabs/zksync-js/core";
-import type { EthersSdk } from "@matterlabs/zksync-js/ethers/sdk";
 
 const FLOW_NAME = "withdrawal";
 
@@ -20,7 +20,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     wallet: WatchdogSigner,
     private l2WalletLock: Mutex,
     intervalMs: number,
-    private sdk: EthersSdk,
+    private sdkManager: SdkManager,
     private receiptStore: WithdrawalReceiptStore
   ) {
     super(wallet, FLOW_NAME, intervalMs);
@@ -28,6 +28,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
 
   protected async executeWatchdogWithdrawal(): Promise<StatusNoSkip> {
     try {
+      const sdk = this.sdkManager.get();
       this.metricRecorder.recordFlowStart();
       const withdrawalParams = await this.metricRecorder.stepExecution({
         stepName: STEPS.estimation,
@@ -39,7 +40,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
             amount: 1n, // just 1 wei
             l2TxOverrides: { nonce: "latest" },
           } as WithdrawParams;
-          const withdrawalQuote = await this.sdk.withdrawals.quote(params);
+          const withdrawalQuote = await sdk.withdrawals.quote(params);
 
           recordStepGas(unwrap(withdrawalQuote.fees.l2!.gasLimit));
           recordStepGasPrice(unwrap(withdrawalQuote.fees.l2!.maxFeePerGas));
@@ -54,7 +55,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
       const withdrawalHandle = await this.metricRecorder.stepExecution({
         stepName: STEPS.send,
         stepTimeoutMs: 10 * SEC,
-        fn: () => this.sdk.withdrawals.create(withdrawalParams),
+        fn: () => sdk.withdrawals.create(withdrawalParams),
       });
       this.logger.info(`Tx (L2: ${withdrawalHandle.l2TxHash}) sent on L2`);
 
@@ -71,7 +72,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
           recordStepGasPrice: (price: bigint) => void;
           recordStepGasCost: (cost: bigint) => void;
         }) => {
-          const receipt = unwrap(await this.sdk.withdrawals.wait(withdrawalHandle, { for: "l2" }));
+          const receipt = unwrap(await sdk.withdrawals.wait(withdrawalHandle, { for: "l2" }));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGasCost(BigInt(unwrap(receipt.gasUsed)) * BigInt(unwrap(receipt.gasPrice)));
@@ -85,6 +86,8 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
       return StatusNoSkip.OK;
     } catch (e) {
       this.logger.error(`Error during flow execution: ${unwrap(e)}`);
+      // the failure may be a stale withdrawal protocol after a chain upgrade; re-detect on the next attempt
+      this.sdkManager.reset();
       this.metricRecorder.recordFlowFailure();
       return StatusNoSkip.FAIL;
     }

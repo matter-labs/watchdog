@@ -10,7 +10,7 @@ import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 import type { WatchdogSigner } from "./wallet";
 import type { ExecutionResultKnown, WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawalFinalization, ZKsyncError } from "@matterlabs/zksync-js/core";
-import type { EthersClient } from "@matterlabs/zksync-js/ethers";
+import type { EthersClient, FinalizationServices } from "@matterlabs/zksync-js/ethers";
 
 const FLOW_NAME = "withdrawalFinalize";
 const FINALIZE_INTERVAL = +(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL ?? 15 * MIN);
@@ -23,19 +23,28 @@ function isProofNotAvailableError(e: ZKsyncError): boolean {
   );
 }
 
+// raised for withdrawals created on protocol v31 once the chain (and the SDK) moved to interop bundles;
+// such a withdrawal can never be finalized through the interop route, so it is not a candidate
+function isPreInteropWithdrawalError(e: ZKsyncError): boolean {
+  return (
+    e?.envelope?.operation === "withdrawals.finalize.fetchParams:decodeMessage" &&
+    e?.envelope?.message?.toLowerCase().includes("not an interop bundle")
+  );
+}
+
 export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   private metricTimeSinceLastFinalizableWithdrawal: Gauge;
   private metricTimeSinceLastFinalizedBlock: Gauge;
-  private finalizationService;
+  private finalizationService: FinalizationServices | undefined;
 
   constructor(
     wallet: WatchdogSigner,
     private client: EthersClient,
     intervalMs: number = FINALIZE_INTERVAL,
-    private receiptStore: WithdrawalReceiptStore
+    private receiptStore: WithdrawalReceiptStore,
+    private createServices: (client: EthersClient) => FinalizationServices = createFinalizationServices
   ) {
     super(wallet, FLOW_NAME, intervalMs);
-    this.finalizationService = createFinalizationServices(this.client);
     this.metricTimeSinceLastFinalizableWithdrawal = new Gauge({
       name: "watchdog_time_since_last_finalizable_withdrawal",
       help: "Blockchain second since last finalizable withdrawal transaction on L2",
@@ -65,13 +74,16 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
 
       this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlock!.timestamp);
 
+      const finalizationService = (this.finalizationService ??= this.createServices(this.client));
       const finalizable = await this.metricRecorder.stepExecution({
         stepName: STEPS.get_finalization_params,
         stepTimeoutMs: 10 * SEC * candidates.length,
-        fn: () => this.findFinalizableWithdrawal(candidates),
+        fn: () => this.findFinalizableWithdrawal(candidates, finalizationService),
       });
 
       if (!finalizable) {
+        // A stale protocol can return NOT_READY or UNFINALIZABLE instead of throwing.
+        this.finalizationService = undefined;
         this.logger.warn(`None of the ${candidates.length} withdrawal(s) in finalized blocks is finalizable yet`);
         this.metricRecorder.recordFlowSkipped();
         return Status.SKIP;
@@ -88,7 +100,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         stepName: STEPS.l1_simulation,
         stepTimeoutMs: 10 * SEC,
         fn: async ({ recordStepGas }) => {
-          const estimate = await this.finalizationService.estimateFinalization(finalization);
+          const estimate = await finalizationService.estimateFinalization(finalization);
           recordStepGas(estimate.gasLimit);
         },
       });
@@ -98,6 +110,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       this.metricRecorder.recordFlowSuccess();
       return Status.OK;
     } catch (e) {
+      this.finalizationService = undefined;
       this.logger.error(`Error during flow execution: ${unwrap(e)}`);
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
@@ -106,21 +119,26 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
 
   /// Returns the first candidate (and its finalization params) that can actually be finalized on L1 right now.
   private async findFinalizableWithdrawal(
-    candidates: ExecutionResultKnown[]
+    candidates: ExecutionResultKnown[],
+    finalizationService: FinalizationServices
   ): Promise<{ execution: ExecutionResultKnown; finalization: WithdrawalFinalization } | null> {
     for (const execution of candidates) {
       const withdrawalHash = execution.l2Receipt.hash;
 
       let finalization: WithdrawalFinalization;
       try {
-        ({ finalization } = await this.finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
+        ({ finalization } = await finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
       } catch (e) {
+        if (isPreInteropWithdrawalError(e as ZKsyncError)) {
+          this.logger.info(`Withdrawal ${withdrawalHash} predates the interop upgrade, skipping it`);
+          continue;
+        }
         if (!isProofNotAvailableError(e as ZKsyncError)) throw e;
         this.logger.info(`No finalization params for withdrawal ${withdrawalHash} yet: ${unwrap(e)}`);
         continue;
       }
 
-      const readiness = await this.finalizationService.simulateFinalizeReadiness(finalization);
+      const readiness = await finalizationService.simulateFinalizeReadiness(finalization);
       switch (readiness.kind) {
         case "READY":
           return { execution, finalization };
