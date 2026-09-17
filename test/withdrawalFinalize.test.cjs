@@ -23,7 +23,7 @@ function preInteropError() {
   return e;
 }
 
-function fakeServices({ fetchError } = {}) {
+function fakeServices({ fetchError, readiness = { kind: "READY" } } = {}) {
   const estimated = [];
   return {
     estimated,
@@ -33,7 +33,7 @@ function fakeServices({ fetchError } = {}) {
       return { finalization: { hash } };
     },
     async simulateFinalizeReadiness() {
-      return { kind: "READY" };
+      return readiness;
     },
     async estimateFinalization(finalization) {
       estimated.push(finalization.hash);
@@ -94,7 +94,60 @@ test("recreates the finalization service after a failed run", async () => {
   store.add(receipt(INTEROP, 10), 10);
 
   assert.equal(await flow.executeWithdrawalFinalize(), Status.FAIL);
+  assert.deepEqual(created, [broken]);
   assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
   assert.deepEqual(created, [broken, healthy]);
   assert.deepEqual(healthy.estimated, [INTEROP]);
+});
+
+for (const kind of ["NOT_READY", "UNFINALIZABLE"]) {
+  test(`re-detects the protocol after a ${kind} result skips finalization`, async () => {
+    const stale = fakeServices({ readiness: { kind, reason: kind === "NOT_READY" ? "unknown" : "unsupported" } });
+    const fresh = fakeServices();
+    const { flow, store, created } = setup([stale, fresh]);
+    store.add(receipt(INTEROP, 10), 10);
+
+    assert.equal(await flow.executeWithdrawalFinalize(), Status.SKIP);
+    assert.deepEqual(created, [stale]);
+    assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+    assert.deepEqual(fresh.estimated, [INTEROP]);
+  });
+}
+
+test("keeps a working service until an upgrade prevents finalization, then re-detects", async () => {
+  const readiness = { kind: "READY" };
+  const beforeUpgrade = fakeServices({ readiness });
+  const afterUpgrade = fakeServices();
+  const { flow, store, created } = setup([beforeUpgrade, afterUpgrade]);
+  store.add(receipt(INTEROP, 10), 10);
+
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+  assert.deepEqual(created, [beforeUpgrade]);
+  Object.assign(readiness, { kind: "UNFINALIZABLE", reason: "message-invalid" });
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.SKIP);
+  assert.deepEqual(created, [beforeUpgrade]);
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+  assert.deepEqual(created, [beforeUpgrade, afterUpgrade]);
+  assert.deepEqual(afterUpgrade.estimated, [INTEROP]);
+});
+
+test("does not create or invalidate the service when there are no withdrawal candidates", async (t) => {
+  const services = fakeServices();
+  const { flow, store, created } = setup([services]);
+  t.mock.method(flow, "getLastExecution", async () => null);
+
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.SKIP);
+  assert.deepEqual(created, []);
+
+  store.add(receipt(INTEROP, 10), 10);
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+
+  const getCandidates = t.mock.method(store, "getFinalizeCandidates", () => []);
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.SKIP);
+  getCandidates.mock.restore();
+
+  assert.equal(await flow.executeWithdrawalFinalize(), Status.OK);
+  assert.deepEqual(created, [services]);
+  assert.deepEqual(services.estimated, [INTEROP, INTEROP]);
 });

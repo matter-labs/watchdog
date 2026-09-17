@@ -35,7 +35,7 @@ function isPreInteropWithdrawalError(e: ZKsyncError): boolean {
 export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   private metricTimeSinceLastFinalizableWithdrawal: Gauge;
   private metricTimeSinceLastFinalizedBlock: Gauge;
-  private finalizationService: FinalizationServices;
+  private finalizationService: FinalizationServices | undefined;
 
   constructor(
     wallet: WatchdogSigner,
@@ -45,7 +45,6 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
     private createServices: (client: EthersClient) => FinalizationServices = createFinalizationServices
   ) {
     super(wallet, FLOW_NAME, intervalMs);
-    this.finalizationService = this.createServices(this.client);
     this.metricTimeSinceLastFinalizableWithdrawal = new Gauge({
       name: "watchdog_time_since_last_finalizable_withdrawal",
       help: "Blockchain second since last finalizable withdrawal transaction on L2",
@@ -75,13 +74,16 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
 
       this.metricTimeSinceLastFinalizedBlock.set(new Date().getTime() / 1000 - finalizedBlock!.timestamp);
 
+      const finalizationService = (this.finalizationService ??= this.createServices(this.client));
       const finalizable = await this.metricRecorder.stepExecution({
         stepName: STEPS.get_finalization_params,
         stepTimeoutMs: 10 * SEC * candidates.length,
-        fn: () => this.findFinalizableWithdrawal(candidates),
+        fn: () => this.findFinalizableWithdrawal(candidates, finalizationService),
       });
 
       if (!finalizable) {
+        // A stale protocol can return NOT_READY or UNFINALIZABLE instead of throwing.
+        this.finalizationService = undefined;
         this.logger.warn(`None of the ${candidates.length} withdrawal(s) in finalized blocks is finalizable yet`);
         this.metricRecorder.recordFlowSkipped();
         return Status.SKIP;
@@ -98,7 +100,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         stepName: STEPS.l1_simulation,
         stepTimeoutMs: 10 * SEC,
         fn: async ({ recordStepGas }) => {
-          const estimate = await this.finalizationService.estimateFinalization(finalization);
+          const estimate = await finalizationService.estimateFinalization(finalization);
           recordStepGas(estimate.gasLimit);
         },
       });
@@ -108,10 +110,8 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       this.metricRecorder.recordFlowSuccess();
       return Status.OK;
     } catch (e) {
+      this.finalizationService = undefined;
       this.logger.error(`Error during flow execution: ${unwrap(e)}`);
-      // the services cache the chain's withdrawal protocol; rebuild them so a failure caused by a
-      // protocol upgrade heals on the next run instead of requiring a restart
-      this.finalizationService = this.createServices(this.client);
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
     }
@@ -119,14 +119,15 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
 
   /// Returns the first candidate (and its finalization params) that can actually be finalized on L1 right now.
   private async findFinalizableWithdrawal(
-    candidates: ExecutionResultKnown[]
+    candidates: ExecutionResultKnown[],
+    finalizationService: FinalizationServices
   ): Promise<{ execution: ExecutionResultKnown; finalization: WithdrawalFinalization } | null> {
     for (const execution of candidates) {
       const withdrawalHash = execution.l2Receipt.hash;
 
       let finalization: WithdrawalFinalization;
       try {
-        ({ finalization } = await this.finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
+        ({ finalization } = await finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
       } catch (e) {
         if (isPreInteropWithdrawalError(e as ZKsyncError)) {
           this.logger.info(`Withdrawal ${withdrawalHash} predates the interop upgrade, skipping it`);
@@ -137,7 +138,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         continue;
       }
 
-      const readiness = await this.finalizationService.simulateFinalizeReadiness(finalization);
+      const readiness = await finalizationService.simulateFinalizeReadiness(finalization);
       switch (readiness.kind) {
         case "READY":
           return { execution, finalization };

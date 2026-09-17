@@ -8,7 +8,7 @@ import { SEC, unwrap, timeoutPromise } from "./utils";
 import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
 import type { Mutex } from "./lock";
-import type { SdkSource } from "./sdkSource";
+import type { SdkManager } from "./sdkManager";
 import type { WatchdogSigner } from "./wallet";
 import type { WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawParams } from "@matterlabs/zksync-js/core";
@@ -20,16 +20,15 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     wallet: WatchdogSigner,
     private l2WalletLock: Mutex,
     intervalMs: number,
-    private sdkSource: SdkSource,
+    private sdkManager: SdkManager,
     private receiptStore: WithdrawalReceiptStore
   ) {
     super(wallet, FLOW_NAME, intervalMs);
   }
 
   protected async executeWatchdogWithdrawal(): Promise<StatusNoSkip> {
-    // resolved per attempt: a failed attempt resets the source so the next one re-detects the protocol
-    const sdk = this.sdkSource.current();
     try {
+      const sdk = this.sdkManager.get();
       this.metricRecorder.recordFlowStart();
       const withdrawalParams = await this.metricRecorder.stepExecution({
         stepName: STEPS.estimation,
@@ -88,7 +87,7 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
     } catch (e) {
       this.logger.error(`Error during flow execution: ${unwrap(e)}`);
       // the failure may be a stale withdrawal protocol after a chain upgrade; re-detect on the next attempt
-      this.sdkSource.reset();
+      this.sdkManager.reset();
       this.metricRecorder.recordFlowFailure();
       return StatusNoSkip.FAIL;
     }

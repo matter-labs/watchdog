@@ -14,7 +14,7 @@ import { PrividiumFlow } from "./prividium";
 import { runSiweFlow } from "./prividiumAuth";
 import { LoggingJsonRpcProvider } from "./rpcLoggingProvider";
 import { RpcTestFlow } from "./rpcTest";
-import { createSdkSource } from "./sdkSource";
+import { createSdkManager } from "./sdkManager";
 import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
 import { MIN, SEC, unwrap } from "./utils";
@@ -108,9 +108,7 @@ const main = async () => {
     return _client;
   };
 
-  const sdkSource = createSdkSource(getClient);
-  const getSdk = () => sdkSource.current();
-  //
+  const sdkManager = createSdkManager(getClient);
 
   l2Provider
     .getBalance(l2Wallet.address)
@@ -131,7 +129,7 @@ const main = async () => {
     new DepositFlow(
       l2Wallet,
       getClient(),
-      getSdk(),
+      sdkManager,
       +unwrap(process.env.FLOW_DEPOSIT_INTERVAL, "FLOW_DEPOSIT_INTERVAL")
     ).runWithRestart();
     enabledFlows++;
@@ -144,7 +142,7 @@ const main = async () => {
       l2Wallet,
       l2WalletLock,
       +unwrap(process.env.FLOW_WITHDRAWAL_INTERVAL, "FLOW_WITHDRAWAL_INTERVAL"),
-      sdkSource,
+      sdkManager,
       withdrawalReceiptStore
     ).runWithRestart();
     enabledFlows++;

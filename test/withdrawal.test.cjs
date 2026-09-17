@@ -30,12 +30,12 @@ function fakeSdk(name, { quoteError } = {}) {
   return sdk;
 }
 
-function fakeSdkSource(sdks) {
+function fakeSdkManager(sdks) {
   let index = 0;
   const resets = [];
   return {
     resets,
-    current: () => sdks[index],
+    get: () => sdks[index],
     reset() {
       resets.push(sdks[index].name);
       index = Math.min(index + 1, sdks.length - 1);
@@ -43,8 +43,8 @@ function fakeSdkSource(sdks) {
   };
 }
 
-function setup(sdkSource) {
-  const flow = new WithdrawalFlow({ address: wallet }, { withLock: (fn) => fn() }, 1, sdkSource, new WithdrawalReceiptStore());
+function setup(sdkManager) {
+  const flow = new WithdrawalFlow({ address: wallet }, { withLock: (fn) => fn() }, 1, sdkManager, new WithdrawalReceiptStore());
   flow.logger = { info() {}, warn() {}, error() {} };
   flow.metricRecorder = {
     recordFlowStart() {},
@@ -58,11 +58,11 @@ function setup(sdkSource) {
 test("a failed attempt resets the SDK so the next attempt re-detects the withdrawal protocol", async () => {
   const stale = fakeSdk("stale", { quoteError: new Error("execution reverted") });
   const fresh = fakeSdk("fresh");
-  const source = fakeSdkSource([stale, fresh]);
-  const flow = setup(source);
+  const manager = fakeSdkManager([stale, fresh]);
+  const flow = setup(manager);
 
   assert.equal(await flow.executeWatchdogWithdrawal(), StatusNoSkip.FAIL);
-  assert.deepEqual(source.resets, ["stale"]);
+  assert.deepEqual(manager.resets, ["stale"]);
 
   assert.equal(await flow.executeWatchdogWithdrawal(), StatusNoSkip.OK);
   assert.deepEqual(fresh.calls, ["quote", "create", "wait"]);
@@ -70,9 +70,9 @@ test("a failed attempt resets the SDK so the next attempt re-detects the withdra
 
 test("a successful attempt keeps the current SDK", async () => {
   const sdk = fakeSdk("current");
-  const source = fakeSdkSource([sdk]);
-  const flow = setup(source);
+  const manager = fakeSdkManager([sdk]);
+  const flow = setup(manager);
 
   assert.equal(await flow.executeWatchdogWithdrawal(), StatusNoSkip.OK);
-  assert.deepEqual(source.resets, []);
+  assert.deepEqual(manager.resets, []);
 });
