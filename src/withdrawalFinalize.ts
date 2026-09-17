@@ -10,7 +10,7 @@ import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 import type { WatchdogSigner } from "./wallet";
 import type { ExecutionResultKnown, WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawalFinalization, ZKsyncError } from "@matterlabs/zksync-js/core";
-import type { EthersClient } from "@matterlabs/zksync-js/ethers";
+import type { EthersClient, FinalizationServices } from "@matterlabs/zksync-js/ethers";
 
 const FLOW_NAME = "withdrawalFinalize";
 const FINALIZE_INTERVAL = +(process.env.FLOW_WITHDRAWAL_FINALIZE_INTERVAL ?? 15 * MIN);
@@ -23,19 +23,29 @@ function isProofNotAvailableError(e: ZKsyncError): boolean {
   );
 }
 
+// raised for withdrawals created on protocol v31 once the chain (and the SDK) moved to interop bundles;
+// such a withdrawal can never be finalized through the interop route, so it is not a candidate
+function isPreInteropWithdrawalError(e: ZKsyncError): boolean {
+  return (
+    e?.envelope?.operation === "withdrawals.finalize.fetchParams:decodeMessage" &&
+    e?.envelope?.message?.toLowerCase().includes("not an interop bundle")
+  );
+}
+
 export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   private metricTimeSinceLastFinalizableWithdrawal: Gauge;
   private metricTimeSinceLastFinalizedBlock: Gauge;
-  private finalizationService;
+  private finalizationService: FinalizationServices;
 
   constructor(
     wallet: WatchdogSigner,
     private client: EthersClient,
     intervalMs: number = FINALIZE_INTERVAL,
-    private receiptStore: WithdrawalReceiptStore
+    private receiptStore: WithdrawalReceiptStore,
+    private createServices: (client: EthersClient) => FinalizationServices = createFinalizationServices
   ) {
     super(wallet, FLOW_NAME, intervalMs);
-    this.finalizationService = createFinalizationServices(this.client);
+    this.finalizationService = this.createServices(this.client);
     this.metricTimeSinceLastFinalizableWithdrawal = new Gauge({
       name: "watchdog_time_since_last_finalizable_withdrawal",
       help: "Blockchain second since last finalizable withdrawal transaction on L2",
@@ -99,6 +109,9 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       return Status.OK;
     } catch (e) {
       this.logger.error(`Error during flow execution: ${unwrap(e)}`);
+      // the services cache the chain's withdrawal protocol; rebuild them so a failure caused by a
+      // protocol upgrade heals on the next run instead of requiring a restart
+      this.finalizationService = this.createServices(this.client);
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
     }
@@ -115,6 +128,10 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
       try {
         ({ finalization } = await this.finalizationService.fetchFinalization(withdrawalHash as `0x${string}`));
       } catch (e) {
+        if (isPreInteropWithdrawalError(e as ZKsyncError)) {
+          this.logger.info(`Withdrawal ${withdrawalHash} predates the interop upgrade, skipping it`);
+          continue;
+        }
         if (!isProofNotAvailableError(e as ZKsyncError)) throw e;
         this.logger.info(`No finalization params for withdrawal ${withdrawalHash} yet: ${unwrap(e)}`);
         continue;

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createEthersClient, createEthersSdk } from "@matterlabs/zksync-js/ethers";
+import { createEthersClient } from "@matterlabs/zksync-js/ethers";
 import { ethers, FetchRequest, JsonRpcProvider } from "ethers";
 import express from "express";
 import { collectDefaultMetrics, register } from "prom-client";
@@ -14,6 +14,7 @@ import { PrividiumFlow } from "./prividium";
 import { runSiweFlow } from "./prividiumAuth";
 import { LoggingJsonRpcProvider } from "./rpcLoggingProvider";
 import { RpcTestFlow } from "./rpcTest";
+import { createSdkSource } from "./sdkSource";
 import { SettlementFlow } from "./settlement";
 import { SimpleTxFlow } from "./transfer";
 import { MIN, SEC, unwrap } from "./utils";
@@ -23,7 +24,7 @@ import { WithdrawalReceiptStore } from "./withdrawalBase";
 import { WithdrawalFinalizeFlow } from "./withdrawalFinalize";
 
 import type { PrividiumTokenStore } from "./prividiumAuth";
-import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
+import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcApiProviderOptions } from "ethers";
 
 function getProviderOptions(opts?: JsonRpcApiProviderOptions): JsonRpcApiProviderOptions {
@@ -107,13 +108,8 @@ const main = async () => {
     return _client;
   };
 
-  let _sdk: EthersSdk | undefined;
-  const getSdk = () => {
-    if (!_sdk) {
-      _sdk = createEthersSdk(getClient());
-    }
-    return _sdk;
-  };
+  const sdkSource = createSdkSource(getClient);
+  const getSdk = () => sdkSource.current();
   //
 
   l2Provider
@@ -148,7 +144,7 @@ const main = async () => {
       l2Wallet,
       l2WalletLock,
       +unwrap(process.env.FLOW_WITHDRAWAL_INTERVAL, "FLOW_WITHDRAWAL_INTERVAL"),
-      getSdk(),
+      sdkSource,
       withdrawalReceiptStore
     ).runWithRestart();
     enabledFlows++;
