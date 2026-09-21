@@ -4,9 +4,9 @@ const { test } = require("node:test");
 const { LoggingJsonRpcProvider } = require("../src/rpcLoggingProvider");
 
 const ADDRESS = "0x0000000000000000000000000000000000000001";
-const RESULTS = { eth_chainId: "0x10f2c", eth_getBalance: "0x1", eth_getTransactionCount: "0x5" };
+const RESULTS = { eth_chainId: "0x10f2c", eth_getBalance: "0x1" };
 
-test("authorized provider detects the network once instead of before every call", async () => {
+test("authorized provider detects the network once, through the authorized path", async () => {
   const seen = [];
   const server = http.createServer((req, res) => {
     let body = "";
@@ -20,22 +20,16 @@ test("authorized provider detects the network once instead of before every call"
   });
   await new Promise((resolve) => server.listen(0, resolve));
 
-  const provider = new LoggingJsonRpcProvider(ADDRESS, `http://127.0.0.1:${server.address().port}`, undefined, {
-    staticNetwork: true,
-    cacheTimeout: -1,
-  });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const provider = new LoggingJsonRpcProvider(ADDRESS, url, undefined, { staticNetwork: true, cacheTimeout: -1 });
   provider.setAuthTokenGetter(() => "test-token");
 
   try {
     await provider.getBalance(ADDRESS);
-    await provider.getTransactionCount(ADDRESS, "latest");
     await provider.getBalance(ADDRESS);
 
-    assert.equal(seen.filter((r) => r.method === "eth_chainId").length, 1);
-    assert.deepEqual(
-      seen.filter((r) => !r.authorized),
-      []
-    );
+    assert.deepEqual(seen.map((r) => r.method).sort(), ["eth_chainId", "eth_getBalance", "eth_getBalance"]);
+    assert.ok(seen.every((r) => r.authorized));
   } finally {
     provider.destroy();
     server.close();

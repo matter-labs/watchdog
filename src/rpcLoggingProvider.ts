@@ -66,9 +66,8 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         });
       }
 
-      // The authorized path below bypasses `super.send`, which is what normally starts the
-      // provider. Without it the provider never becomes ready, `staticNetwork` never caches
-      // the network, and every `getNetwork()` sends an extra anonymous `eth_chainId`.
+      // The authorized path skips `super.send`, the only caller of `_start()`. Unstarted, the provider
+      // never caches the network and every `getNetwork()` sends an extra anonymous `eth_chainId`.
       this._start();
 
       const startTime = Date.now();
