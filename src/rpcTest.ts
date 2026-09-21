@@ -1,7 +1,8 @@
 import "dotenv/config";
 
 import { BaseFlow } from "./baseFlow";
-import { SEC, timeoutPromise } from "./utils";
+import { RPC_TEST_TIMEOUT } from "./configs";
+import { timeoutPromise } from "./utils";
 
 import type { JsonRpcProvider } from "ethers";
 
@@ -24,7 +25,7 @@ export class RpcTestFlow extends BaseFlow {
 
         await this.metricRecorder.stepExecution({
           stepName: "get_block_number",
-          stepTimeoutMs: SEC,
+          stepTimeoutMs: RPC_TEST_TIMEOUT,
           fn: async () => {
             const resp = await this.provider.send("eth_blockNumber", []);
             this.logger.debug("eth_blockNumber response: " + resp);

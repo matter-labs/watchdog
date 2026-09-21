@@ -69,7 +69,7 @@ All configuration is handled via environment variables (see `.env` for examples)
 - `CHAIN_L1_RPC_URL`: L1 JSON-RPC endpoint
 - `L2_POLLING_INTERVAL`: L2 provider polling interval in ms (default: `100`)
 - `L1_POLLING_INTERVAL`: L1 provider polling interval in ms (default: ethers.js default, currenly 4 sec)
-- `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 1 second)
+- `L2_EXECUTION_TIMEOUT`: L2 transaction inclusion timeout in ms (default: 1 second). Behind an authenticated proxy one receipt poll costs 70–150 ms, so a 1 second budget fails on any single slow round trip; size it per environment.
 - `L2_RPC_TIMEOUT`: Per-request timeout for the L2 provider in ms (default: 5 seconds). Ethers' own default is 300 seconds, far longer than any flow interval — a request that never receives a response keeps its caller blocked for five minutes instead of failing fast.
 - `L1_RPC_TIMEOUT`: Per-request timeout for the L1 provider in ms (default: 5 seconds)
 - `FLOW_CRASH_RESTART_INTERVAL`: How long to wait before restarting a flow after an unexpected error in ms (default: `10000`). The actual restart delay is `min(FLOW_CRASH_RESTART_INTERVAL, <flow interval>)` to avoid unnecessarily long waits for flows with large intervals (e.g. withdrawal).
@@ -150,6 +150,7 @@ Perform a simple `eth_BlockNumber` request to check if the L2 RPC is available a
 Options:
 - `FLOW_RPC_TEST_ENABLE` -- set to `0` to disable (enabled by default)
 - `FLOW_RPC_TEST_INTERVAL` -- interval in ms (defaults to 1000 ms = 1 second)
+- `RPC_TEST_TIMEOUT` -- budget for the `eth_blockNumber` call in ms (defaults to 1000 ms = 1 second)
 
 ### Settlement
 
