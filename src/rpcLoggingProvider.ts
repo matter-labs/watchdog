@@ -30,6 +30,8 @@ export type AuthTokenGetter = () => string | null;
  */
 class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   declare readonly rpcUrl?: string;
+  /** Per-request timeout of the `FetchRequest` this provider was built with, if any. */
+  declare readonly rpcTimeoutMs?: number;
   declare readonly walletAddress: string;
   getAuthToken?: AuthTokenGetter;
 
@@ -42,6 +44,7 @@ class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   ) {
     super(url, network, options);
     this.rpcUrl = typeof url === "string" ? url : url?.url;
+    this.rpcTimeoutMs = typeof url === "string" ? undefined : url?.timeout;
     this.walletAddress = walletAdddress;
   }
 
@@ -58,6 +61,11 @@ function getRpcUrl(provider: any): string | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getWalletAddress(provider: any): string {
   return provider.walletAddress;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getRpcTimeoutMs(provider: any): number | undefined {
+  return provider.rpcTimeoutMs;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,7 +99,15 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         const url = getRpcUrl(self);
 
         if (token && url) {
-          result = await sendAuthorizedRpcRequest(getWalletAddress(this), url, token, id, method, params);
+          result = await sendAuthorizedRpcRequest(
+            getWalletAddress(this),
+            url,
+            token,
+            id,
+            method,
+            params,
+            getRpcTimeoutMs(self)
+          );
         } else {
           result = await super.send(method, params);
         }
@@ -250,7 +266,8 @@ async function sendAuthorizedRpcRequest(
   token: string,
   id: number,
   method: string,
-  requestParams: unknown[] | Record<string, unknown>
+  requestParams: unknown[] | Record<string, unknown>,
+  timeoutMs?: number
 ) {
   const params = adjustParamsForPrividium(walletAddress, method, requestParams);
 
@@ -267,6 +284,7 @@ async function sendAuthorizedRpcRequest(
       Authorization: `Bearer ${token}`,
     },
     body,
+    signal: timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const data = (await res.json()) as { result?: unknown; error?: { code?: number; message?: string } };
   if (!res.ok || data.error) {

@@ -76,3 +76,26 @@ test("every call is observed in watchdog_rpc_call_duration_seconds with its outc
     server.close();
   }
 });
+
+test("authorized calls honour the FetchRequest timeout", async () => {
+  const { FetchRequest } = require("ethers");
+  const server = http.createServer(() => {
+    // never answer
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+
+  const request = new FetchRequest(`http://127.0.0.1:${server.address().port}`);
+  request.timeout = 200;
+  const provider = new LoggingJsonRpcProvider(ADDRESS, request, undefined, { staticNetwork: true, cacheTimeout: -1 });
+  provider.setAuthTokenGetter(() => "test-token");
+
+  const started = Date.now();
+  try {
+    await assert.rejects(provider.send("eth_blockNumber", []), /timeout|aborted/i);
+    assert.ok(Date.now() - started < 2000, "request did not fail within the configured timeout");
+  } finally {
+    provider.destroy();
+    server.closeAllConnections();
+    server.close();
+  }
+});
