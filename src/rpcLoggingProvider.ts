@@ -1,4 +1,5 @@
 import { JsonRpcProvider } from "ethers";
+import { Counter, Histogram } from "prom-client";
 import winston from "winston";
 
 import type { FetchRequest, JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
@@ -9,6 +10,18 @@ const levelEnabled = (level: string): boolean => npmLevels[level] <= npmLevels[w
 
 const bigintReplacer = (_: string, value: unknown): unknown => (typeof value === "bigint" ? value.toString() : value);
 
+const rpcCallDuration = new Histogram({
+  name: "watchdog_rpc_call_duration_seconds",
+  help: "Duration of a single JSON-RPC call as seen by the watchdog, including the network path to the endpoint",
+  labelNames: ["method", "outcome"],
+  buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+});
+const rpcCallErrors = new Counter({
+  name: "watchdog_rpc_call_errors_total",
+  help: "JSON-RPC calls that failed, by JSON-RPC error code (or 'transport' when no code was returned)",
+  labelNames: ["method", "code"],
+});
+
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
 export type AuthTokenGetter = () => string | null;
 
@@ -17,6 +30,8 @@ export type AuthTokenGetter = () => string | null;
  */
 class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   declare readonly rpcUrl?: string;
+  /** Per-request timeout of the `FetchRequest` this provider was built with, if any. */
+  declare readonly rpcTimeoutMs?: number;
   declare readonly walletAddress: string;
   getAuthToken?: AuthTokenGetter;
 
@@ -29,6 +44,7 @@ class AuthableEthersJsonRpcProvider extends JsonRpcProvider {
   ) {
     super(url, network, options);
     this.rpcUrl = typeof url === "string" ? url : url?.url;
+    this.rpcTimeoutMs = typeof url === "string" ? undefined : url?.timeout;
     this.walletAddress = walletAdddress;
   }
 
@@ -45,6 +61,11 @@ function getRpcUrl(provider: any): string | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getWalletAddress(provider: any): string {
   return provider.walletAddress;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getRpcTimeoutMs(provider: any): number | undefined {
+  return provider.rpcTimeoutMs;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,12 +99,21 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         const url = getRpcUrl(self);
 
         if (token && url) {
-          result = await sendAuthorizedRpcRequest(getWalletAddress(this), url, token, id, method, params);
+          result = await sendAuthorizedRpcRequest(
+            getWalletAddress(this),
+            url,
+            token,
+            id,
+            method,
+            params,
+            getRpcTimeoutMs(self)
+          );
         } else {
           result = await super.send(method, params);
         }
 
         const duration = Date.now() - startTime;
+        rpcCallDuration.observe({ method, outcome: "ok" }, duration / 1000);
         winston.debug(`[JSON-RPC Response] ID: ${id} Method: ${method} Duration: ${duration}ms`, {
           rpcResponse: {
             id,
@@ -102,6 +132,8 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         const duration = Date.now() - startTime;
+        rpcCallDuration.observe({ method, outcome: "error" }, duration / 1000);
+        rpcCallErrors.inc({ method, code: error?.code != null ? String(error.code) : "transport" });
 
         winston.error(`[JSON-RPC Error] ID: ${id} Method: ${method} Duration: ${duration}ms Error: ${error.message}`, {
           rpcError: {
@@ -140,22 +172,18 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         while (true) {
           failIfTimedOut();
           try {
-            // Cheap inclusion probe: the raw JSON-RPC result is not parsed into ethers
-            // objects, so no per-log address checksumming (keccak256) happens while
-            // polling. The receipt is only formatted once, after it is confirmed.
-            const raw = (await this.send("eth_getTransactionReceipt", [hash])) as { blockNumber?: string } | null;
-            failIfTimedOut();
-            if (raw?.blockNumber != null) {
-              if (confirms <= 1) {
-                const receipt = await this.getTransactionReceipt(hash);
-                failIfTimedOut();
-                // The formatting fetch may hit a different RPC replica than the
-                // raw inclusion probe. Keep polling if that replica has not seen
-                // the receipt yet.
-                if (receipt != null) {
-                  return receipt;
-                }
-              } else {
+            if (confirms <= 1) {
+              // Prividium submits via `eth_sendRawTransactionSync`, so the first poll normally returns the receipt.
+              const receipt = await this.getTransactionReceipt(hash);
+              failIfTimedOut();
+              if (receipt != null) {
+                return receipt;
+              }
+            } else {
+              // Raw probe: skips ethers' per-log checksumming on every block while waiting; formatted once at the end.
+              const raw = (await this.send("eth_getTransactionReceipt", [hash])) as { blockNumber?: string } | null;
+              failIfTimedOut();
+              if (raw?.blockNumber != null) {
                 const current = await this.getBlockNumber();
                 failIfTimedOut();
                 if (current - Number(raw.blockNumber) + 1 >= confirms) {
@@ -234,7 +262,8 @@ async function sendAuthorizedRpcRequest(
   token: string,
   id: number,
   method: string,
-  requestParams: unknown[] | Record<string, unknown>
+  requestParams: unknown[] | Record<string, unknown>,
+  timeoutMs?: number
 ) {
   const params = adjustParamsForPrividium(walletAddress, method, requestParams);
 
@@ -251,6 +280,7 @@ async function sendAuthorizedRpcRequest(
       Authorization: `Bearer ${token}`,
     },
     body,
+    signal: timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : undefined,
   });
   const data = (await res.json()) as { result?: unknown; error?: { code?: number; message?: string } };
   if (!res.ok || data.error) {

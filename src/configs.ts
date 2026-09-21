@@ -1,6 +1,7 @@
 import { MIN, SEC } from "./utils";
 
 export const L2_EXECUTION_TIMEOUT = +(process.env.L2_EXECUTION_TIMEOUT ?? 1 * SEC);
+export const RPC_TEST_TIMEOUT = +(process.env.RPC_TEST_TIMEOUT ?? 1 * SEC);
 export const SETTLEMENT_DEADLINE = +(process.env.SETTLEMENT_DEADLINE ?? 90 * MIN);
 export const L2_BALANCE_TIMEOUT = +(process.env.L2_BALANCE_TIMEOUT ?? 10 * SEC);
 
