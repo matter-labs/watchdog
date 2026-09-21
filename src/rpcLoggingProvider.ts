@@ -1,4 +1,5 @@
 import { JsonRpcProvider } from "ethers";
+import { Counter, Histogram } from "prom-client";
 import winston from "winston";
 
 import type { FetchRequest, JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
@@ -8,6 +9,18 @@ const npmLevels = winston.config.npm.levels;
 const levelEnabled = (level: string): boolean => npmLevels[level] <= npmLevels[winston.level ?? "info"];
 
 const bigintReplacer = (_: string, value: unknown): unknown => (typeof value === "bigint" ? value.toString() : value);
+
+const rpcCallDuration = new Histogram({
+  name: "watchdog_rpc_call_duration_seconds",
+  help: "Duration of a single JSON-RPC call as seen by the watchdog, including the network path to the endpoint",
+  labelNames: ["method", "outcome"],
+  buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+});
+const rpcCallErrors = new Counter({
+  name: "watchdog_rpc_call_errors_total",
+  help: "JSON-RPC calls that failed, by JSON-RPC error code (or 'transport' when no code was returned)",
+  labelNames: ["method", "code"],
+});
 
 /** Optional auth token getter for Prividium (Authorization: Bearer). */
 export type AuthTokenGetter = () => string | null;
@@ -84,6 +97,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         }
 
         const duration = Date.now() - startTime;
+        rpcCallDuration.observe({ method, outcome: "ok" }, duration / 1000);
         winston.debug(`[JSON-RPC Response] ID: ${id} Method: ${method} Duration: ${duration}ms`, {
           rpcResponse: {
             id,
@@ -102,6 +116,8 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (error: any) {
         const duration = Date.now() - startTime;
+        rpcCallDuration.observe({ method, outcome: "error" }, duration / 1000);
+        rpcCallErrors.inc({ method, code: error?.code != null ? String(error.code) : "transport" });
 
         winston.error(`[JSON-RPC Error] ID: ${id} Method: ${method} Duration: ${duration}ms Error: ${error.message}`, {
           rpcError: {

@@ -35,3 +35,44 @@ test("authorized provider detects the network once, through the authorized path"
     server.close();
   }
 });
+
+test("every call is observed in watchdog_rpc_call_duration_seconds with its outcome", async () => {
+  const { register } = require("prom-client");
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const { id, method } = JSON.parse(body);
+      res.setHeader("content-type", "application/json");
+      if (method === "eth_getBalance") {
+        res.end(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32603, message: "Internal error" } }));
+      } else {
+        res.end(JSON.stringify({ jsonrpc: "2.0", id, result: RESULTS[method] }));
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const provider = new LoggingJsonRpcProvider(ADDRESS, url, undefined, { staticNetwork: true, cacheTimeout: -1 });
+  provider.setAuthTokenGetter(() => "test-token");
+
+  // The registry is process-global, so compare against a snapshot taken before the calls.
+  const count = async (method, outcome) =>
+    (await register.getSingleMetric("watchdog_rpc_call_duration_seconds").get()).values.find(
+      (v) => v.metricName.endsWith("_count") && v.labels.method === method && v.labels.outcome === outcome
+    )?.value ?? 0;
+  const before = { chainId: await count("eth_chainId", "ok"), balance: await count("eth_getBalance", "error") };
+
+  try {
+    await assert.rejects(provider.getBalance(ADDRESS), /Internal error/);
+    const errors = (await register.getSingleMetric("watchdog_rpc_call_errors_total").get()).values;
+
+    assert.equal(await count("eth_chainId", "ok"), before.chainId + 1);
+    assert.equal(await count("eth_getBalance", "error"), before.balance + 1);
+    assert.equal(errors.find((v) => v.labels.method === "eth_getBalance")?.labels.code, "-32603");
+  } finally {
+    provider.destroy();
+    server.close();
+  }
+});

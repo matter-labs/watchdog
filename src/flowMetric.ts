@@ -147,7 +147,17 @@ export class FlowMetricRecorder {
         store.metric_step_gas_cost.set({ flow: this.flowName, step: stepName }, Number(cost));
       },
     };
-    const ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
+    let ret: T;
+    try {
+      ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
+    } catch (error) {
+      // A timed-out step must still move the gauge, or dashboards keep the last healthy value.
+      const latency = (Date.now() - start) / 1000;
+      store.metric_latency.set({ flow: this.flowName, stage: stepName }, latency);
+      this._lastStepLatency = latency;
+      this.logger.info(`Step ${stepName} failed after ${latency} seconds`);
+      throw error;
+    }
     const end = Date.now();
     const latency = (end - start) / 1000; // in seconds
     store.metric_latency.set({ flow: this.flowName, stage: stepName }, latency);
