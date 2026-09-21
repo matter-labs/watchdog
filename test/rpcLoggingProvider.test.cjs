@@ -99,3 +99,49 @@ test("authorized calls honour the FetchRequest timeout", async () => {
     server.close();
   }
 });
+
+test("waitForTransaction with one confirmation costs one call per poll", async () => {
+  const HASH = "0x" + "11".repeat(32);
+  const receipt = {
+    transactionHash: HASH,
+    blockHash: "0x" + "22".repeat(32),
+    blockNumber: "0x10",
+    transactionIndex: "0x0",
+    from: ADDRESS,
+    to: ADDRESS,
+    cumulativeGasUsed: "0x5208",
+    gasUsed: "0x5208",
+    effectiveGasPrice: "0x1",
+    contractAddress: null,
+    logs: [],
+    logsBloom: "0x" + "00".repeat(256),
+    status: "0x1",
+    type: "0x2",
+  };
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const { id, method } = JSON.parse(body);
+      seen.push(method);
+      res.setHeader("content-type", "application/json");
+      const result = method === "eth_getTransactionReceipt" ? receipt : RESULTS[method];
+      res.end(JSON.stringify({ jsonrpc: "2.0", id, result }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const provider = new LoggingJsonRpcProvider(ADDRESS, url, undefined, { staticNetwork: true, cacheTimeout: -1 });
+  provider.setAuthTokenGetter(() => "test-token");
+
+  try {
+    const got = await provider.waitForTransaction(HASH, 1, 2000);
+    assert.equal(got.hash, HASH);
+    assert.equal(seen.filter((m) => m === "eth_getTransactionReceipt").length, 1);
+  } finally {
+    provider.destroy();
+    server.close();
+  }
+});

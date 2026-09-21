@@ -172,22 +172,18 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
         while (true) {
           failIfTimedOut();
           try {
-            // Cheap inclusion probe: the raw JSON-RPC result is not parsed into ethers
-            // objects, so no per-log address checksumming (keccak256) happens while
-            // polling. The receipt is only formatted once, after it is confirmed.
-            const raw = (await this.send("eth_getTransactionReceipt", [hash])) as { blockNumber?: string } | null;
-            failIfTimedOut();
-            if (raw?.blockNumber != null) {
-              if (confirms <= 1) {
-                const receipt = await this.getTransactionReceipt(hash);
-                failIfTimedOut();
-                // The formatting fetch may hit a different RPC replica than the
-                // raw inclusion probe. Keep polling if that replica has not seen
-                // the receipt yet.
-                if (receipt != null) {
-                  return receipt;
-                }
-              } else {
+            if (confirms <= 1) {
+              // Prividium submits via `eth_sendRawTransactionSync`, so the first poll normally returns the receipt.
+              const receipt = await this.getTransactionReceipt(hash);
+              failIfTimedOut();
+              if (receipt != null) {
+                return receipt;
+              }
+            } else {
+              // Raw probe: skips ethers' per-log checksumming on every block while waiting; formatted once at the end.
+              const raw = (await this.send("eth_getTransactionReceipt", [hash])) as { blockNumber?: string } | null;
+              failIfTimedOut();
+              if (raw?.blockNumber != null) {
                 const current = await this.getBlockNumber();
                 failIfTimedOut();
                 if (current - Number(raw.blockNumber) + 1 >= confirms) {
