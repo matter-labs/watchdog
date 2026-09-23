@@ -1,66 +1,56 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { register } = require("prom-client");
-const { FlowMetricRecorder } = require("../src/flowMetric");
+const { FlowMetricRecorder, SkipReason } = require("../src/flowMetric");
 const { timeoutPromise } = require("../src/utils");
 
-const silentLogger = { info: () => {}, error: () => {}, debug: () => {}, warn: () => {} };
+const logger = { info: () => {}, error: () => {} };
 
-const sample = async (metricName, labels) => {
-  const base = metricName.replace(/_count$/, "");
-  const metric = (await register.getMetricsAsJSON()).find((m) => m.name === base);
-  return metric?.values.find(
-    (v) =>
-      (v.metricName ?? base) === metricName &&
-      Object.entries(labels).every(([key, value]) => v.labels[key] === value)
-  );
+const stepCount = async (flow, outcome) => {
+  const { values } = await register.getSingleMetric("watchdog_step_duration_seconds").get();
+  return values.find((v) => v.metricName.endsWith("_count") && v.labels.flow === flow && v.labels.outcome === outcome)
+    ?.value;
 };
 
-const runStep = async (flow, stepName, stepTimeoutMs, fn) => {
-  const recorder = new FlowMetricRecorder(flow, silentLogger);
+const flowLabels = async (flow, outcome) => {
+  const { values } = await register.getSingleMetric("watchdog_status_counter").get();
+  return values.find((v) => v.labels.flow === flow && v.labels.outcome === outcome)?.labels;
+};
+
+const runFailingStep = async (flow, stepTimeoutMs, fn) => {
+  const recorder = new FlowMetricRecorder(flow, logger);
   recorder.recordFlowStart();
-  try {
-    await recorder.stepExecution({ stepName, stepTimeoutMs, fn });
-  } catch {
-    recorder.recordFlowFailure();
-  }
-  return recorder;
+  await assert.rejects(() => recorder.stepExecution({ stepName: "step", stepTimeoutMs, fn }));
 };
 
-test("a step that exceeds its budget is recorded as a timeout, not a generic error", async () => {
-  await runStep("t_timeout", "slow", 10, () => timeoutPromise(200));
+test("a step that exceeds its budget is a timeout, not a generic error", async () => {
+  await runFailingStep("t_timeout", 10, () => timeoutPromise(50));
 
-  const timedOut = await sample("watchdog_step_duration_seconds_count", { flow: "t_timeout", outcome: "timeout" });
-  assert.equal(timedOut?.value, 1, "the step should be counted once under outcome=timeout");
-
-  const asError = await sample("watchdog_step_duration_seconds_count", { flow: "t_timeout", outcome: "error" });
-  assert.equal(asError, undefined, "a timeout must not also be counted as an error");
-
-  const flowFailure = await sample("watchdog_status_counter", { flow: "t_timeout", outcome: "failure" });
-  assert.equal(flowFailure?.labels.reason, "timeout", "the flow failure should carry reason=timeout");
+  assert.equal(await stepCount("t_timeout", "timeout"), 1);
+  assert.equal(await stepCount("t_timeout", "error"), undefined, "a timeout must not also count as an error");
 });
 
-test("a step that throws is recorded as an error", async () => {
-  await runStep("t_error", "boom", 1000, async () => {
+test("a step that throws is an error, not a timeout", async () => {
+  await runFailingStep("t_error", 1000, async () => {
     throw new Error("boom");
   });
 
-  const asError = await sample("watchdog_step_duration_seconds_count", { flow: "t_error", outcome: "error" });
-  assert.equal(asError?.value, 1);
-
-  const flowFailure = await sample("watchdog_status_counter", { flow: "t_error", outcome: "failure" });
-  assert.equal(flowFailure?.labels.reason, "error");
+  assert.equal(await stepCount("t_error", "error"), 1);
+  assert.equal(await stepCount("t_error", "timeout"), undefined);
 });
 
-test("a successful step is observed once and leaves the failure reason unset", async () => {
-  const recorder = new FlowMetricRecorder("t_ok", silentLogger);
+test("a successful step is observed once", async () => {
+  const recorder = new FlowMetricRecorder("t_ok", logger);
   recorder.recordFlowStart();
-  await recorder.stepExecution({ stepName: "fast", stepTimeoutMs: 1000, fn: async () => "done" });
-  recorder.recordFlowSuccess();
+  await recorder.stepExecution({ stepName: "step", stepTimeoutMs: 1000, fn: async () => "done" });
 
-  const ok = await sample("watchdog_step_duration_seconds_count", { flow: "t_ok", outcome: "ok" });
-  assert.equal(ok?.value, 1);
+  assert.equal(await stepCount("t_ok", "ok"), 1);
+});
 
-  const success = await sample("watchdog_status_counter", { flow: "t_ok", outcome: "success" });
-  assert.equal(success?.labels.reason, "");
+test("a skip records why the flow did no work", async () => {
+  const recorder = new FlowMetricRecorder("t_skip", logger);
+  recorder.recordFlowStart();
+  recorder.recordFlowSkipped(SkipReason.NOT_FINALIZABLE);
+
+  assert.equal((await flowLabels("t_skip", "skipped")).reason, "not_finalizable");
 });

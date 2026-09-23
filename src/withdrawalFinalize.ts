@@ -3,7 +3,7 @@ import "dotenv/config";
 import { createFinalizationServices } from "@matterlabs/zksync-js/ethers";
 import { Gauge } from "prom-client";
 
-import { Status } from "./flowMetric";
+import { SkipReason, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise } from "./utils";
 import { WithdrawalBaseFlow, STEPS } from "./withdrawalBase";
 
@@ -68,7 +68,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
 
       if (candidates.length === 0) {
         this.logger.warn("No withdrawal found to try finalize");
-        this.metricRecorder.recordFlowSkipped();
+        this.metricRecorder.recordFlowSkipped(SkipReason.NO_CANDIDATES);
         return Status.SKIP;
       }
 
@@ -85,7 +85,7 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
         // A stale protocol can return NOT_READY or UNFINALIZABLE instead of throwing.
         this.finalizationService = undefined;
         this.logger.warn(`None of the ${candidates.length} withdrawal(s) in finalized blocks is finalizable yet`);
-        this.metricRecorder.recordFlowSkipped();
+        this.metricRecorder.recordFlowSkipped(SkipReason.NOT_FINALIZABLE);
         return Status.SKIP;
       }
       const { execution, finalization } = finalizable;

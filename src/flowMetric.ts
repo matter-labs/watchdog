@@ -16,14 +16,20 @@ export const Status = {
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
-export const StepOutcome = {
+const StepOutcome = {
   OK: "ok",
   ERROR: "error",
   TIMEOUT: "timeout",
 } as const;
-export type StepOutcome = (typeof StepOutcome)[keyof typeof StepOutcome];
+type StepOutcome = (typeof StepOutcome)[keyof typeof StepOutcome];
 
-type FailureReason = typeof StepOutcome.ERROR | typeof StepOutcome.TIMEOUT;
+/** Why a flow did no work. A skip is benign or not depending on this. */
+export const SkipReason = {
+  NO_CANDIDATES: "no_candidates",
+  NOT_FINALIZABLE: "not_finalizable",
+  L1_GAS_PRICE: "l1_gas_price",
+} as const;
+export type SkipReason = (typeof SkipReason)[keyof typeof SkipReason];
 
 /// singleton for metric storage
 class FlowMetricStore {
@@ -43,7 +49,7 @@ class FlowMetricStore {
       name: "watchdog_step_duration_seconds",
       help: "Duration of a single step execution, by flow, step and outcome",
       labelNames: ["flow", "step", "outcome"],
-      buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000],
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 180, 900],
     });
     this.metric_status = new Gauge({ name: "watchdog_status", help: "Watchdog flow status", labelNames: ["flow"] });
     // DEPRECATED: use `metric_status_counter` instead
@@ -56,7 +62,7 @@ class FlowMetricStore {
       name: "watchdog_status_counter",
       help: "Watchdog flow status counter",
       // outcome can be "success", "failure" and "skipped";
-      // reason is "timeout" or "error" on a failure, and empty otherwise
+      // reason is set only on a skip. A failed step's cause is in watchdog_step_duration_seconds.
       labelNames: ["flow", "outcome", "reason"],
     });
     this.metric_step_timestamp = new Gauge({
@@ -115,7 +121,6 @@ type Numberish = number | bigint | string;
 
 export class FlowMetricRecorder {
   startTime: number | null = null;
-  private lastFailureReason: FailureReason | null = null;
   constructor(
     private flowName: string,
     private logger: Logger
@@ -160,7 +165,6 @@ export class FlowMetricRecorder {
       return ret;
     } catch (error) {
       outcome = error instanceof TimeoutError ? StepOutcome.TIMEOUT : StepOutcome.ERROR;
-      this.lastFailureReason = outcome;
       this.logger.info(`Step ${stepName} ${outcome} after ${(Date.now() - start) / 1000} seconds`);
       throw error;
     } finally {
@@ -174,8 +178,7 @@ export class FlowMetricRecorder {
       const latency = (endTime - this.startTime) / 1000; // in seconds
       store.metric_status.set({ flow: this.flowName }, 1);
       store.metric_status_hist.observe({ flow: this.flowName }, 1);
-      store.metric_status_counter.inc({ flow: this.flowName, outcome: "success", reason: "" });
-      this.lastFailureReason = null;
+      store.metric_status_counter.inc({ flow: this.flowName, outcome: "success" });
       this.startTime = null;
       this.logger.info(`Flow completed in ${latency} seconds`);
     } else {
@@ -183,27 +186,25 @@ export class FlowMetricRecorder {
     }
   }
 
-  public recordFlowSkipped() {
+  public recordFlowSkipped(reason: SkipReason) {
     if (this.startTime) {
       const endTime = Date.now();
       const latency = (endTime - this.startTime) / 1000; // in seconds
       store.metric_status.set({ flow: this.flowName }, 0.5);
-      store.metric_status_counter.inc({ flow: this.flowName, outcome: "skipped", reason: "" });
+      store.metric_status_counter.inc({ flow: this.flowName, outcome: "skipped", reason });
       this.startTime = null;
-      this.logger.info(`Flow skipped after ${latency} seconds`);
+      this.logger.info(`Flow skipped after ${latency} seconds (${reason})`);
     } else {
       throw new Error("Flow start was not recorded");
     }
   }
 
   public recordFlowFailure() {
-    const reason = this.lastFailureReason ?? StepOutcome.ERROR;
     store.metric_status.set({ flow: this.flowName }, 0);
     store.metric_status_hist.observe({ flow: this.flowName }, 0);
-    store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure", reason });
-    this.lastFailureReason = null;
+    store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure" });
     this.startTime = null;
-    this.logger.error(`Flow failed (${reason})`);
+    this.logger.error("Flow failed");
   }
 
   /// MANUAL FUNCTIONS
@@ -225,13 +226,13 @@ export class FlowMetricRecorder {
       case Status.OK: {
         store.metric_status.set({ flow: this.flowName }, 1);
         store.metric_status_hist.observe({ flow: this.flowName }, 1);
-        store.metric_status_counter.inc({ flow: this.flowName, outcome: "success", reason: "" });
+        store.metric_status_counter.inc({ flow: this.flowName, outcome: "success" });
         break;
       }
       case Status.FAIL: {
         store.metric_status.set({ flow: this.flowName }, 0);
         store.metric_status_hist.observe({ flow: this.flowName }, 0);
-        store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure", reason: StepOutcome.ERROR });
+        store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure" });
         break;
       }
       default: {
