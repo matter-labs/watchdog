@@ -11,10 +11,12 @@ export const withLatency = async <T>(fn: () => Promise<T>): Promise<{ return: T;
   return { return: ret, latency: (Date.now() - start) / 1000 }; // in seconds for backward compatibility
 };
 
+export class TimeoutError extends Error {}
+
 export const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, context?: string): Promise<T> => {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error(`${context ?? "Promise"} timed out after ${timeoutMs} ms`));
+      reject(new TimeoutError(`${context ?? "Promise"} timed out after ${timeoutMs} ms`));
     }, timeoutMs);
 
     promise
