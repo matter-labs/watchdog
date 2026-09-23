@@ -1,3 +1,5 @@
+import { isError } from "ethers";
+
 export const unwrap = <T>(value: T | undefined | null, label?: string): T => {
   if (value === undefined || value === null) {
     throw new Error(label ? `${label} is undefined or null` : "Value is undefined or null");
@@ -16,10 +18,11 @@ export class TimeoutError extends Error {
 }
 
 /**
- * True for our own step timeouts and for the per-request deadline ethers enforces,
- * which rejects with a DOMException named TimeoutError rather than an Error we throw.
+ * A deadline reaches us in two shapes: our own TimeoutError and AbortSignal.timeout both carry the
+ * name, while ethers' FetchRequest deadline is an ordinary Error carrying code "TIMEOUT".
  */
-export const isTimeoutError = (error: unknown): boolean => error instanceof Error && error.name === "TimeoutError";
+export const isTimeoutError = (error: unknown): boolean =>
+  error instanceof Error && (error.name === "TimeoutError" || isError(error, "TIMEOUT"));
 
 export const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, context?: string): Promise<T> => {
   return new Promise((resolve, reject) => {
