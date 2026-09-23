@@ -1,6 +1,6 @@
 import { Counter, Gauge, Histogram } from "prom-client";
 
-import { TimeoutError, withTimeout } from "./utils";
+import { isTimeoutError, withTimeout } from "./utils";
 
 import type { Logger } from "winston";
 
@@ -169,7 +169,7 @@ export class FlowMetricRecorder {
       });
       return ret;
     } catch (error) {
-      outcome = error instanceof TimeoutError ? StepOutcome.TIMEOUT : StepOutcome.ERROR;
+      outcome = isTimeoutError(error) ? StepOutcome.TIMEOUT : StepOutcome.ERROR;
       const durationSeconds = (Date.now() - start) / 1000;
       this.logger.info(`Step ${stepName} ${outcome} after ${durationSeconds} seconds`, {
         step: stepName,

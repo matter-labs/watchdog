@@ -11,7 +11,15 @@ export const withLatency = async <T>(fn: () => Promise<T>): Promise<{ return: T;
   return { return: ret, latency: (Date.now() - start) / 1000 }; // in seconds for backward compatibility
 };
 
-export class TimeoutError extends Error {}
+export class TimeoutError extends Error {
+  readonly name = "TimeoutError";
+}
+
+/**
+ * True for our own step timeouts and for the per-request deadline ethers enforces,
+ * which rejects with a DOMException named TimeoutError rather than an Error we throw.
+ */
+export const isTimeoutError = (error: unknown): boolean => error instanceof Error && error.name === "TimeoutError";
 
 export const withTimeout = <T>(promise: Promise<T>, timeoutMs: number, context?: string): Promise<T> => {
   return new Promise((resolve, reject) => {
