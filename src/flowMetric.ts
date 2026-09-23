@@ -160,12 +160,22 @@ export class FlowMetricRecorder {
     try {
       const ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
       const end = Date.now();
+      const durationSeconds = (end - start) / 1000;
       store.metric_step_timestamp.set({ flow: this.flowName, step: stepName }, end);
-      this.logger.info(`Step ${stepName} took ${(end - start) / 1000} seconds`);
+      this.logger.info(`Step ${stepName} took ${durationSeconds} seconds`, {
+        step: stepName,
+        outcome,
+        duration_s: durationSeconds,
+      });
       return ret;
     } catch (error) {
       outcome = error instanceof TimeoutError ? StepOutcome.TIMEOUT : StepOutcome.ERROR;
-      this.logger.info(`Step ${stepName} ${outcome} after ${(Date.now() - start) / 1000} seconds`);
+      const durationSeconds = (Date.now() - start) / 1000;
+      this.logger.info(`Step ${stepName} ${outcome} after ${durationSeconds} seconds`, {
+        step: stepName,
+        outcome,
+        duration_s: durationSeconds,
+      });
       throw error;
     } finally {
       store.metric_step_duration.observe({ flow: this.flowName, step: stepName, outcome }, (Date.now() - start) / 1000);
@@ -180,7 +190,7 @@ export class FlowMetricRecorder {
       store.metric_status_hist.observe({ flow: this.flowName }, 1);
       store.metric_status_counter.inc({ flow: this.flowName, outcome: "success" });
       this.startTime = null;
-      this.logger.info(`Flow completed in ${latency} seconds`);
+      this.logger.info(`Flow completed in ${latency} seconds`, { outcome: "success", duration_s: latency });
     } else {
       throw new Error("Flow start was not recorded");
     }
@@ -193,7 +203,11 @@ export class FlowMetricRecorder {
       store.metric_status.set({ flow: this.flowName }, 0.5);
       store.metric_status_counter.inc({ flow: this.flowName, outcome: "skipped", reason });
       this.startTime = null;
-      this.logger.info(`Flow skipped after ${latency} seconds (${reason})`);
+      this.logger.info(`Flow skipped after ${latency} seconds (${reason})`, {
+        outcome: "skipped",
+        reason,
+        duration_s: latency,
+      });
     } else {
       throw new Error("Flow start was not recorded");
     }
@@ -204,7 +218,7 @@ export class FlowMetricRecorder {
     store.metric_status_hist.observe({ flow: this.flowName }, 0);
     store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure" });
     this.startTime = null;
-    this.logger.error("Flow failed");
+    this.logger.error("Flow failed", { outcome: "failure" });
   }
 
   /// MANUAL FUNCTIONS
