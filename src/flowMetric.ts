@@ -47,7 +47,7 @@ class FlowMetricStore {
   constructor() {
     this.metric_step_duration = new Histogram({
       name: "watchdog_step_duration_seconds",
-      help: "Duration of a single step execution, by flow, step and outcome",
+      help: "Duration of a single step execution. Latency queries should filter on outcome ok, since a timed-out run sits at the step budget",
       labelNames: ["flow", "step", "outcome"],
       buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 180, 900],
     });
