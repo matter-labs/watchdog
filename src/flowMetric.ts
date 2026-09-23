@@ -1,6 +1,6 @@
 import { Counter, Gauge, Histogram } from "prom-client";
 
-import { withTimeout } from "./utils";
+import { isTimeoutError, withTimeout } from "./utils";
 
 import type { Logger } from "winston";
 
@@ -16,11 +16,25 @@ export const Status = {
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
 
+const StepOutcome = {
+  OK: "ok",
+  ERROR: "error",
+  TIMEOUT: "timeout",
+} as const;
+type StepOutcome = (typeof StepOutcome)[keyof typeof StepOutcome];
+
+/** Why a flow did no work. A skip is benign or not depending on this. */
+export const SkipReason = {
+  NO_CANDIDATES: "no_candidates",
+  NOT_FINALIZABLE: "not_finalizable",
+  L1_GAS_PRICE: "l1_gas_price",
+} as const;
+export type SkipReason = (typeof SkipReason)[keyof typeof SkipReason];
+
 /// singleton for metric storage
 class FlowMetricStore {
-  public metric_latency: Gauge;
+  public metric_step_duration: Histogram;
   public metric_step_timestamp: Gauge; //in ms
-  public metric_latency_total: Gauge;
   public metric_status: Gauge;
   public metric_status_counter: Counter;
   public metric_status_hist: Histogram;
@@ -31,15 +45,11 @@ class FlowMetricStore {
   public metric_wallet_balance: Gauge;
 
   constructor() {
-    this.metric_latency = new Gauge({
-      name: "watchdog_latency",
-      help: "Watchdog step latencies for all flows",
-      labelNames: ["flow", "stage"],
-    });
-    this.metric_latency_total = new Gauge({
-      name: "watchdog_latency_total",
-      help: "Watchdog latency totals for all flows",
-      labelNames: ["flow"],
+    this.metric_step_duration = new Histogram({
+      name: "watchdog_step_duration_seconds",
+      help: "Duration of a single step execution. Latency queries should filter on outcome ok, since a timed-out run sits at the step budget",
+      labelNames: ["flow", "step", "outcome"],
+      buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 180, 900],
     });
     this.metric_status = new Gauge({ name: "watchdog_status", help: "Watchdog flow status", labelNames: ["flow"] });
     // DEPRECATED: use `metric_status_counter` instead
@@ -51,8 +61,9 @@ class FlowMetricStore {
     this.metric_status_counter = new Counter({
       name: "watchdog_status_counter",
       help: "Watchdog flow status counter",
-      // outcome can be "success", "failure" and "skipped"
-      labelNames: ["flow", "outcome"],
+      // outcome can be "success", "failure" and "skipped";
+      // reason is set only on a skip. A failed step's cause is in watchdog_step_duration_seconds.
+      labelNames: ["flow", "outcome", "reason"],
     });
     this.metric_step_timestamp = new Gauge({
       name: "watchdog_step_timestamp",
@@ -110,8 +121,6 @@ type Numberish = number | bigint | string;
 
 export class FlowMetricRecorder {
   startTime: number | null = null;
-  private _lastStepLatency: number | null = null;
-  private _lastExecutionTotalLatency: number | null = null;
   constructor(
     private flowName: string,
     private logger: Logger
@@ -147,50 +156,58 @@ export class FlowMetricRecorder {
         store.metric_step_gas_cost.set({ flow: this.flowName, step: stepName }, Number(cost));
       },
     };
-    let ret: T;
+    let outcome: StepOutcome = StepOutcome.OK;
     try {
-      ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
+      const ret = await withTimeout(fn(helpers), stepTimeoutMs, `step ${stepName}`);
+      const end = Date.now();
+      const durationSeconds = (end - start) / 1000;
+      store.metric_step_timestamp.set({ flow: this.flowName, step: stepName }, end);
+      this.logger.info(`Step ${stepName} took ${durationSeconds} seconds`, {
+        step: stepName,
+        outcome,
+        duration_s: durationSeconds,
+      });
+      return ret;
     } catch (error) {
-      // A timed-out step must still move the gauge, or dashboards keep the last healthy value.
-      const latency = (Date.now() - start) / 1000;
-      store.metric_latency.set({ flow: this.flowName, stage: stepName }, latency);
-      this._lastStepLatency = latency;
-      this.logger.info(`Step ${stepName} failed after ${latency} seconds`);
+      outcome = isTimeoutError(error) ? StepOutcome.TIMEOUT : StepOutcome.ERROR;
+      const durationSeconds = (Date.now() - start) / 1000;
+      this.logger.info(`Step ${stepName} ${outcome} after ${durationSeconds} seconds`, {
+        step: stepName,
+        outcome,
+        duration_s: durationSeconds,
+      });
       throw error;
+    } finally {
+      store.metric_step_duration.observe({ flow: this.flowName, step: stepName, outcome }, (Date.now() - start) / 1000);
     }
-    const end = Date.now();
-    const latency = (end - start) / 1000; // in seconds
-    store.metric_latency.set({ flow: this.flowName, stage: stepName }, latency);
-    this._lastStepLatency = latency;
-    store.metric_step_timestamp.set({ flow: this.flowName, step: stepName }, end);
-    this.logger.info(`Step ${stepName} took ${latency} seconds`);
-    return ret;
   }
 
   public recordFlowSuccess() {
     if (this.startTime) {
       const endTime = Date.now();
       const latency = (endTime - this.startTime) / 1000; // in seconds
-      store.metric_latency_total.set({ flow: this.flowName }, latency);
       store.metric_status.set({ flow: this.flowName }, 1);
       store.metric_status_hist.observe({ flow: this.flowName }, 1);
       store.metric_status_counter.inc({ flow: this.flowName, outcome: "success" });
-      this._lastExecutionTotalLatency = latency;
       this.startTime = null;
-      this.logger.info(`Flow completed in ${latency} seconds`);
+      this.logger.info(`Flow completed in ${latency} seconds`, { outcome: "success", duration_s: latency });
     } else {
       throw new Error("Flow start was not recorded");
     }
   }
 
-  public recordFlowSkipped() {
+  public recordFlowSkipped(reason: SkipReason) {
     if (this.startTime) {
       const endTime = Date.now();
       const latency = (endTime - this.startTime) / 1000; // in seconds
       store.metric_status.set({ flow: this.flowName }, 0.5);
-      store.metric_status_counter.inc({ flow: this.flowName, outcome: "skipped" });
+      store.metric_status_counter.inc({ flow: this.flowName, outcome: "skipped", reason });
       this.startTime = null;
-      this.logger.info(`Flow skipped after ${latency} seconds`);
+      this.logger.info(`Flow skipped after ${latency} seconds (${reason})`, {
+        outcome: "skipped",
+        reason,
+        duration_s: latency,
+      });
     } else {
       throw new Error("Flow start was not recorded");
     }
@@ -201,28 +218,11 @@ export class FlowMetricRecorder {
     store.metric_status_hist.observe({ flow: this.flowName }, 0);
     store.metric_status_counter.inc({ flow: this.flowName, outcome: "failure" });
     this.startTime = null;
-    this.logger.error("Flow failed");
+    this.logger.error("Flow failed", { outcome: "failure" });
   }
 
   /// MANUAL FUNCTIONS
   /// Needed for recording based solly on onchain data
-  public manualRecordStatus(status: Status, latencyTotalSec: number) {
-    store.metric_status.set({ flow: this.flowName }, status === Status.OK ? 1 : 0);
-    store.metric_status_hist.observe({ flow: this.flowName }, status === Status.OK ? 1 : 0);
-    store.metric_status_counter.inc({ flow: this.flowName, outcome: status === Status.OK ? "success" : "failure" });
-    if (status === Status.OK) {
-      store.metric_latency_total.set({ flow: this.flowName }, latencyTotalSec);
-      this._lastExecutionTotalLatency = latencyTotalSec;
-    }
-  }
-
-  public manualRecordStepCompletion(stepName: string, latencySec: number, stepEndSec: number) {
-    store.metric_latency.set({ flow: this.flowName, stage: stepName }, latencySec);
-    this._lastStepLatency = latencySec;
-    store.metric_step_timestamp.set({ flow: this.flowName, step: stepName }, stepEndSec * 1000);
-    this.logger.info(`Step ${stepName} took ${latencySec} seconds`);
-  }
-
   public manualRecordStepGas(stepName: string, gas: Numberish) {
     store.metric_step_gas.set({ flow: this.flowName, step: stepName }, Number(gas));
   }

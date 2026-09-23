@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const { test } = require("node:test");
 const { LoggingJsonRpcProvider } = require("../src/rpcLoggingProvider");
+const { isTimeoutError } = require("../src/utils");
 
 const ADDRESS = "0x0000000000000000000000000000000000000001";
 const RESULTS = { eth_chainId: "0x10f2c", eth_getBalance: "0x1" };
@@ -91,7 +92,10 @@ test("authorized calls honour the FetchRequest timeout", async () => {
 
   const started = Date.now();
   try {
-    await assert.rejects(provider.send("eth_blockNumber", []), /timeout|aborted/i);
+    await assert.rejects(provider.send("eth_blockNumber", []), (error) => {
+      assert.ok(isTimeoutError(error), "a request timeout must classify as a timeout, or the step records it as an error");
+      return /timeout|aborted/i.test(error.message);
+    });
     assert.ok(Date.now() - started < 2000, "request did not fail within the configured timeout");
   } finally {
     provider.destroy();

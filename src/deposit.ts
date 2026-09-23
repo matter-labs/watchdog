@@ -13,7 +13,7 @@ import {
   STEPS,
   getErc20Contract,
 } from "./depositBase";
-import { recordL1BaseTokenBalance, recordL1EthBalance, Status } from "./flowMetric";
+import { recordL1BaseTokenBalance, recordL1EthBalance, SkipReason, Status } from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise, withTimeout } from "./utils";
 
 import type { SdkManager } from "./sdkManager";
@@ -180,7 +180,7 @@ export class DepositFlow extends DepositBaseFlow {
         this.logger.warn(
           `Gas price ${deposit.quote.fees.l1!.maxFeePerGas} is higher than limit ${DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI}. Skipping deposit`
         );
-        this.metricRecorder.recordFlowSkipped();
+        this.metricRecorder.recordFlowSkipped(SkipReason.L1_GAS_PRICE);
         return Status.SKIP;
       }
 

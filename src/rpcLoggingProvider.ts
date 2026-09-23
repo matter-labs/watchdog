@@ -2,6 +2,8 @@ import { JsonRpcProvider } from "ethers";
 import { Counter, Histogram } from "prom-client";
 import winston from "winston";
 
+import { TimeoutError } from "./utils";
+
 import type { FetchRequest, JsonRpcApiProviderOptions, Networkish, TransactionReceipt } from "ethers";
 
 const npmLevels = winston.config.npm.levels;
@@ -163,7 +165,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
       let timedOut = false;
       const failIfTimedOut = () => {
         if (timedOut) {
-          throw new Error("timeout");
+          throw new TimeoutError("timeout");
         }
       };
 
@@ -212,7 +214,7 @@ const LoggingProviderMixing = <TBase extends Ctor<JsonRpcProvider>>(Base: TBase)
       const timeoutPromise = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           timedOut = true;
-          reject(new Error("timeout"));
+          reject(new TimeoutError("timeout"));
         }, timeout);
       });
 
