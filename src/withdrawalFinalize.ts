@@ -56,15 +56,23 @@ export class WithdrawalFinalizeFlow extends WithdrawalBaseFlow {
   }
   protected async executeWithdrawalFinalize(): Promise<Status> {
     try {
-      const blockTimestamp = await this.getCurrentChainTimestamp();
-      const finalizedBlock = await this.wallet.provider!.getBlock("finalized");
       this.metricRecorder.recordFlowStart();
 
-      const candidates = this.receiptStore.getFinalizeCandidates(finalizedBlock?.number);
-      if (candidates.length === 0) {
-        const lastExecution = await this.getLastExecution("finalized", this.wallet.address);
-        if (lastExecution) candidates.push(lastExecution);
-      }
+      const { blockTimestamp, finalizedBlock, candidates } = await this.metricRecorder.stepExecution({
+        stepName: STEPS.find_candidates,
+        stepTimeoutMs: 30 * SEC,
+        fn: async () => {
+          const blockTimestamp = await this.getCurrentChainTimestamp();
+          const finalizedBlock = await this.wallet.provider!.getBlock("finalized");
+
+          const candidates = this.receiptStore.getFinalizeCandidates(finalizedBlock?.number);
+          if (candidates.length === 0) {
+            const lastExecution = await this.getLastExecution("finalized", this.wallet.address);
+            if (lastExecution) candidates.push(lastExecution);
+          }
+          return { blockTimestamp, finalizedBlock, candidates };
+        },
+      });
 
       if (candidates.length === 0) {
         this.logger.warn("No withdrawal found to try finalize");

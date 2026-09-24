@@ -33,6 +33,8 @@ export type ExecutionResultKnown = {
 export type ExecutionResult = ExecutionResultUnknown | ExecutionResultKnown;
 
 export const STEPS = {
+  base_token_approval: "base_token_approval",
+  balance: "balance",
   estimation: "estimation",
   send: "send",
   l1_execution: "l1_execution",
