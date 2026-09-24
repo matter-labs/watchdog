@@ -43,6 +43,7 @@ export const STEPS = {
   estimation: "estimation",
   send: "send",
   l2_execution: "l2_execution",
+  find_candidates: "find_candidates",
   get_finalization_params: "get_finalization_params",
   l1_simulation: "l1_simulation",
 };
