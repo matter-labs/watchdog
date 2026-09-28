@@ -125,35 +125,47 @@ export class DepositFlow extends DepositBaseFlow {
   protected async executeWatchdogDeposit(): Promise<Status> {
     try {
       const sdk = this.sdkManager.get();
-      // even before flow start we check base token allowance and perform an unlimited approval if needed
-      if (this.baseToken != ETH_ADDRESS) {
-        const { l1AssetRouter, l1NativeTokenVault } = await sdk.contracts.addresses();
-        const erc20Contract = getErc20Contract(this.baseToken, this.client.l1, this.wallet);
-        // The vault pulls tokens on upgraded bridges. Keep the router approval as well:
-        // older bridges and the SDK's deposit planner still check its allowance.
-        for (const spender of new Set([l1AssetRouter, l1NativeTokenVault])) {
-          const allowance = await erc20Contract.allowance(this.wallet.address, spender);
+      this.metricRecorder.recordFlowStart();
 
-          // heuristic condition to determine if we should perform the infinite approval
-          if (allowance < parseEther("100000")) {
-            this.logger.info(`Approving base token ${this.baseToken} for infinite amount to ${spender}`);
-            const approval = await erc20Contract.approve(spender, MaxInt256);
-            // Deposits use the latest mined nonce, so confirm the approval first.
-            await withTimeout(approval.wait(1), 3 * MIN, `Base token approval for ${spender}`);
-          } else {
-            this.logger.info(`Base token ${this.baseToken} already has approval for ${spender}`);
-          }
-        }
-        const baseTokenBalance = await erc20Contract.balanceOf(this.wallet.address);
-        this.logger.info(`L1 base token (${this.baseToken}) balance: ${formatEther(baseTokenBalance.toString())}`);
-        recordL1BaseTokenBalance(baseTokenBalance);
+      if (this.baseToken != ETH_ADDRESS) {
+        await this.metricRecorder.stepExecution({
+          stepName: STEPS.base_token_approval,
+          // both spenders can need an approval transaction, each with its own 3 minute wait
+          stepTimeoutMs: 10 * MIN,
+          fn: async () => {
+            const { l1AssetRouter, l1NativeTokenVault } = await sdk.contracts.addresses();
+            const erc20Contract = getErc20Contract(this.baseToken, this.client.l1, this.wallet);
+            // The vault pulls tokens on upgraded bridges. Keep the router approval as well:
+            // older bridges and the SDK's deposit planner still check its allowance.
+            for (const spender of new Set([l1AssetRouter, l1NativeTokenVault])) {
+              const allowance = await erc20Contract.allowance(this.wallet.address, spender);
+
+              // heuristic condition to determine if we should perform the infinite approval
+              if (allowance < parseEther("100000")) {
+                this.logger.info(`Approving base token ${this.baseToken} for infinite amount to ${spender}`);
+                const approval = await erc20Contract.approve(spender, MaxInt256);
+                // Deposits use the latest mined nonce, so confirm the approval first.
+                await withTimeout(approval.wait(1), 3 * MIN, `Base token approval for ${spender}`);
+              } else {
+                this.logger.info(`Base token ${this.baseToken} already has approval for ${spender}`);
+              }
+            }
+            const baseTokenBalance = await erc20Contract.balanceOf(this.wallet.address);
+            this.logger.info(`L1 base token (${this.baseToken}) balance: ${formatEther(baseTokenBalance.toString())}`);
+            recordL1BaseTokenBalance(baseTokenBalance);
+          },
+        });
       }
 
-      const l1EthBalance = await this.client.l1.getBalance(this.wallet.address);
-      this.logger.info(`L1 ETH balance: ${formatEther(l1EthBalance.toString())}`);
-      recordL1EthBalance(l1EthBalance);
-
-      this.metricRecorder.recordFlowStart();
+      await this.metricRecorder.stepExecution({
+        stepName: STEPS.balance,
+        stepTimeoutMs: 10 * SEC,
+        fn: async () => {
+          const l1EthBalance = await this.client.l1.getBalance(this.wallet.address);
+          this.logger.info(`L1 ETH balance: ${formatEther(l1EthBalance.toString())}`);
+          recordL1EthBalance(l1EthBalance);
+        },
+      });
 
       const deposit = await this.metricRecorder.stepExecution({
         stepName: STEPS.estimation,
