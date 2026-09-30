@@ -13,7 +13,14 @@ import {
   STEPS,
   getErc20Contract,
 } from "./depositBase";
-import { recordL1BaseTokenBalance, recordL1EthBalance, SkipReason, Status } from "./flowMetric";
+import {
+  recordL1BaseTokenBalance,
+  recordL1EthBalance,
+  recordL2BaseTokenBalance,
+  SkipReason,
+  Status,
+  StatusNoSkip,
+} from "./flowMetric";
 import { SEC, MIN, unwrap, timeoutPromise, withTimeout } from "./utils";
 
 import type { SdkManager } from "./sdkManager";
@@ -23,12 +30,31 @@ import type { EthersClient } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
 type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+/** Keep the L2 wallet funded from L1: below `min`, the deposit carries enough to bring it back to `target`. */
+export type L2TopUp = { min: bigint; target: bigint };
 
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
 const MIN_PRIORITY_FEE_ENV = "FLOW_DEPOSIT_L1_MIN_PRIORITY_FEE_GWEI";
 const DEFAULT_FEE_BUMP_PERCENT = 10;
 const FEE_BUMP_PERCENT_ENV = "FLOW_DEPOSIT_FEE_BUMP_PERCENT";
+const L2_BALANCE_MIN_ENV = "FLOW_DEPOSIT_L2_BALANCE_MIN";
+const L2_BALANCE_TARGET_ENV = "FLOW_DEPOSIT_L2_BALANCE_TARGET";
+
+/** Reads the optional L2 top-up settings (amounts in ETH). Returns null when top-up is off. */
+export function readL2TopUpConfig(env: NodeJS.ProcessEnv = process.env): L2TopUp | null {
+  const min = env[L2_BALANCE_MIN_ENV];
+  const target = env[L2_BALANCE_TARGET_ENV];
+  if (!min && !target) return null;
+  if (!min || !target) {
+    throw new Error(`${L2_BALANCE_MIN_ENV} and ${L2_BALANCE_TARGET_ENV} must be set together`);
+  }
+  const config = { min: parseEther(min), target: parseEther(target) };
+  if (config.min <= 0n || config.target < config.min) {
+    throw new Error(`L2 top-up needs 0 < ${L2_BALANCE_MIN_ENV} <= ${L2_BALANCE_TARGET_ENV}, got ${min} and ${target}`);
+  }
+  return config;
+}
 
 function isUnderpricedError(e: ZKsyncError): boolean {
   return (e?.envelope?.cause as { code?: string })?.code === "REPLACEMENT_UNDERPRICED";
@@ -43,6 +69,10 @@ export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
   private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
   private feeOverride: Fee | null = null;
+  private l2TopUp: L2TopUp | null = readL2TopUpConfig();
+  // Set while a deposit we sent may not have executed on L2 yet. Its funds would not show in the
+  // L2 balance, so a top-up then would fund the wallet twice.
+  private depositPending = false;
 
   constructor(
     wallet: WatchdogSigner,
@@ -122,6 +152,44 @@ export class DepositFlow extends DepositBaseFlow {
     }
   }
 
+  /**
+   * Amount that brings the L2 balance back to the top-up target, or null to deposit the usual 1 wei.
+   * Needs a fresh L2 balance read, no deposit of ours still on its way to L2, and an L1 balance that
+   * covers the amount plus `depositFees` (the L1 gas and L2 cost of a deposit, which do not depend on its amount).
+   */
+  private async l2TopUpAmount(l1EthBalance: bigint, depositFees: bigint): Promise<bigint | null> {
+    if (!this.l2TopUp) return null;
+    if (this.depositPending) {
+      this.logger.info("L2 top-up: the previous deposit has not executed on L2 yet, depositing 1 wei");
+      return null;
+    }
+    let l2Balance: bigint;
+    try {
+      l2Balance = await this.client.l2.getBalance(this.wallet.address);
+    } catch (error: unknown) {
+      this.logger.warn(`L2 top-up: cannot read the L2 balance, depositing 1 wei: ${(error as Error)?.message}`);
+      return null;
+    }
+    recordL2BaseTokenBalance(l2Balance);
+    const { min, target } = this.l2TopUp;
+    if (l2Balance >= min) return null;
+
+    const amount = target - l2Balance;
+    const required = amount + depositFees;
+    if (l1EthBalance < required) {
+      this.logger.error(
+        `L2 top-up: L2 balance ${formatEther(l2Balance)} is below ${formatEther(min)}, but the L1 balance ` +
+          `${formatEther(l1EthBalance)} does not cover the ${formatEther(required)} needed, depositing 1 wei`
+      );
+      return null;
+    }
+    this.logger.info(
+      `L2 top-up: L2 balance ${formatEther(l2Balance)} is below ${formatEther(min)}, ` +
+        `depositing ${formatEther(amount)} to reach ${formatEther(target)}`
+    );
+    return amount;
+  }
+
   protected async executeWatchdogDeposit(): Promise<Status> {
     try {
       const sdk = this.sdkManager.get();
@@ -157,13 +225,14 @@ export class DepositFlow extends DepositBaseFlow {
         });
       }
 
-      await this.metricRecorder.stepExecution({
+      const l1EthBalance = await this.metricRecorder.stepExecution({
         stepName: STEPS.balance,
         stepTimeoutMs: 10 * SEC,
         fn: async () => {
           const l1EthBalance = await this.client.l1.getBalance(this.wallet.address);
           this.logger.info(`L1 ETH balance: ${formatEther(l1EthBalance.toString())}`);
           recordL1EthBalance(l1EthBalance);
+          return l1EthBalance;
         },
       });
 
@@ -171,13 +240,19 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.estimation,
         stepTimeoutMs: 30 * SEC,
         fn: async ({ recordStepGas, recordStepGasCost, recordStepGasPrice }) => {
-          const params = {
+          let params = {
             to: this.wallet.address,
             token: this.baseToken,
-            amount: 1n, // just 1 wei
+            amount: 1n, // just 1 wei, unless the L2 balance needs a top-up
             refundRecipient: this.wallet.address,
           } as DepositParams;
-          const depositQuote = await sdk.deposits.quote(params);
+          let depositQuote = await sdk.deposits.quote(params);
+          // Quoting an amount the L1 balance cannot cover fails, so the 1 wei quote prices the top-up first.
+          const topUp = await this.l2TopUpAmount(l1EthBalance, depositQuote.fees.maxTotal);
+          if (topUp != null) {
+            params = { ...params, amount: topUp };
+            depositQuote = await sdk.deposits.quote(params);
+          }
           recordStepGas(depositQuote.fees.l1!.gasLimit);
           recordStepGasPrice(depositQuote.fees.l1!.maxFeePerGas);
           recordStepGasCost(depositQuote.fees.l1!.maxTotal);
@@ -201,6 +276,8 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
+          // Cleared only once the deposit executes on L2: until then its funds may be in flight.
+          this.depositPending = true;
           const depositHandle = await sdk.deposits.create({
             ...deposit.params,
             l1TxOverrides: {
@@ -235,6 +312,7 @@ export class DepositFlow extends DepositBaseFlow {
           return receipt;
         },
       });
+      this.depositPending = false;
       this.logger.info(`Tx ${txHashes} mined on L2`);
       this.metricRecorder.recordFlowSuccess();
       this.feeOverride = null;
@@ -259,8 +337,14 @@ export class DepositFlow extends DepositBaseFlow {
     this.baseToken = await this.client.baseToken(this.chainId);
     this.zkChainAddress = await bridgehub.getHyperchain(this.chainId);
     this.sharedBridge = l1AssetRouter;
+    if (this.l2TopUp && this.baseToken != ETH_ADDRESS) {
+      this.logger.error(`L2 top-up supports ETH-based chains only, base token is ${this.baseToken}: top-up disabled`);
+      this.l2TopUp = null;
+    }
 
     const lastExecution = await this.getLastExecution(this.wallet.address);
+    // A deposit sent before a restart that has not executed on L2 blocks top-ups like one sent by this run.
+    this.depositPending = lastExecution.status === StatusNoSkip.FAIL;
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastDepositSec = currentBlockchainTimestamp - lastExecution.timestampL1;
     if (lastExecution.status != null) this.metricRecorder.recordPreviousExecutionStatus(lastExecution.status!);
