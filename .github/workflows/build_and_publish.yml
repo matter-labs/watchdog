@@ -13,12 +13,22 @@ jobs:
   push_to_registry:
     name: Build and push Docker image
     runs-on: [matterlabs-ci-runner]
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Authenticate to Google Cloud
+        if: ${{ startsWith(github.ref, 'refs/tags') || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_AR_PUBLISHER_SERVICE_ACCOUNT }}
 
       - name: Auth to google artifact registry
         run: |
