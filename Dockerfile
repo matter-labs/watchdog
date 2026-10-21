@@ -1,4 +1,4 @@
-FROM node:24.18.0-alpine AS builder
+FROM node:24.22.1-alpine@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY . .
 
 RUN yarn build && yarn install --production --frozen-lockfile --prefer-offline
 
-FROM node:24.18.0-alpine
+FROM node:24.22.1-alpine@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d
 
 # Apply OpenSSL security updates independently of the pinned Node image.
 RUN apk upgrade --no-cache libcrypto3 libssl3
