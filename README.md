@@ -99,6 +99,19 @@ Options:
 
 Deposits 1 wei of base token from L1 to L2. Waits for execution on L2.
 
+With `FLOW_DEPOSIT_L2_BALANCE_MIN` and `FLOW_DEPOSIT_L2_BALANCE_TARGET` set, the deposit also keeps the
+watchdog's L2 wallet funded from its L1 wallet. When the L2 balance is below the minimum, the deposit carries
+enough to bring it back to the target. It does this only when all of these hold:
+- the chain's base token is ETH (the settings are ignored with an error log otherwise);
+- the L2 balance could be read;
+- the previous deposit has executed on L2 (its funds would not show in the L2 balance yet);
+- the L1 wallet covers the amount plus the deposit fees.
+
+Otherwise it deposits the usual 1 wei, so deposit monitoring keeps running.
+
+This works on Prividium chains, whose L1 transaction filterer lets a wallet deposit to its own address.
+Keep the L1 wallet funded for both sides.
+
 Options:
 - `FLOW_DEPOSIT_ENABLE` -- set to `1` to enable
 - `FLOW_DEPOSIT_INTERVAL` -- interval in ms
@@ -111,6 +124,10 @@ Options:
   watchdog deposit transactions (default: `0.001`)
 - `FLOW_DEPOSIT_FEE_BUMP_PERCENT` -- percentage to increase both `maxFeePerGas` and
   `maxPriorityFeePerGas` when a deposit transaction is rejected as underpriced (default: `10`)
+- `FLOW_DEPOSIT_L2_BALANCE_MIN` -- L2 balance in ETH below which the deposit tops the L2 wallet up
+  (e.g. `0.5`; unset by default, which disables the top-up)
+- `FLOW_DEPOSIT_L2_BALANCE_TARGET` -- L2 balance in ETH that a top-up brings the wallet back to
+  (e.g. `1.5`; must be set together with the minimum and be at least as large)
 - `MAX_LOGS_BLOCKS` -- max number of blocks in range of `eth_getLogs` request
 
 ### Deposit User
