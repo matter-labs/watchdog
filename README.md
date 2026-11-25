@@ -97,11 +97,16 @@ Options:
 
 ### Deposit
 
-Deposits 1 wei of base token from L1 to L2. Waits for execution on L2.
+Deposits base token (1 wei by default) from L1 to L2, to the watchdog's own address. Waits for execution on L2.
 
 Options:
 - `FLOW_DEPOSIT_ENABLE` -- set to `1` to enable
 - `FLOW_DEPOSIT_INTERVAL` -- interval in ms
+- `FLOW_DEPOSIT_AMOUNT_WEI` -- positive decimal integer in wei to deposit on each run (default `1`).
+  Set higher temporarily to top up the watchdog's L2 wallet on chains where no external
+  wallet can fund it (Prividium chains only accept deposits whose L1 sender equals the
+  L2 recipient). Restore the default after the top-up. If receipt confirmation times out,
+  the watchdog retries with the same handle. An uncertain submission without a transaction hash ends that run.
 - `FLOW_DEPOSIT_RETRY_INTERVAL` -- retry interval in ms (default to 5 minutes)
 - `FLOW_DEPOSIT_RETRY_LIMIT` -- retry limit (default to 3)
 - `FLOW_DEPOSIT_L2_TIMEOUT` -- timeout of l2 deposit confirmation in ms

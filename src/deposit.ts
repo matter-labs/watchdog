@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { ETH_ADDRESS } from "@matterlabs/zksync-js/core";
 import { getL2TransactionHashFromLogs } from "@matterlabs/zksync-js/ethers";
-import { formatEther, formatUnits, MaxInt256, parseEther, parseUnits } from "ethers";
+import { formatEther, formatUnits, MaxInt256, MaxUint256, parseUnits } from "ethers";
 
 import {
   DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI,
@@ -18,10 +18,11 @@ import { SEC, MIN, unwrap, timeoutPromise, withTimeout } from "./utils";
 
 import type { SdkManager } from "./sdkManager";
 import type { WatchdogSigner } from "./wallet";
-import type { DepositParams, ZKsyncError } from "@matterlabs/zksync-js/core";
-import type { EthersClient } from "@matterlabs/zksync-js/ethers";
+import type { DepositParams, DepositWaitable, ZKsyncError } from "@matterlabs/zksync-js/core";
+import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
+type DepositRun = { handle?: DepositWaitable };
 type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
 
 const FLOW_NAME = "deposit";
@@ -41,6 +42,7 @@ function maxOptionalBigInt(a: bigint | undefined, b: bigint | undefined): bigint
 
 export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
+  private readonly amount: bigint;
   private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
   private feeOverride: Fee | null = null;
 
@@ -51,6 +53,11 @@ export class DepositFlow extends DepositBaseFlow {
     intervalMs: number
   ) {
     super(wallet, client, FLOW_NAME, intervalMs);
+    const raw = process.env.FLOW_DEPOSIT_AMOUNT_WEI ?? "1";
+    this.amount = /^\d+$/.test(raw) ? BigInt(raw) : 0n;
+    if (this.amount === 0n || this.amount > MaxUint256) {
+      throw new Error("FLOW_DEPOSIT_AMOUNT_WEI must be a positive decimal uint256");
+    }
   }
 
   private getMinPriorityFeePerGas(depositPriorityFee: bigint | null = null): bigint {
@@ -95,7 +102,7 @@ export class DepositFlow extends DepositBaseFlow {
       const quoteParams = {
         to: this.wallet.address,
         token: this.baseToken,
-        amount: 1n,
+        amount: this.amount,
         refundRecipient: this.wallet.address,
       } as DepositParams;
       const quote = await this.sdkManager.get().deposits.quote(quoteParams);
@@ -122,12 +129,14 @@ export class DepositFlow extends DepositBaseFlow {
     }
   }
 
-  protected async executeWatchdogDeposit(): Promise<Status> {
+  protected async executeWatchdogDeposit(run: DepositRun = {}): Promise<Status | "submission-unknown"> {
+    let creating = false;
     try {
       const sdk = this.sdkManager.get();
       this.metricRecorder.recordFlowStart();
+      if (run.handle) return this.confirmDeposit(sdk, run.handle);
 
-      if (this.baseToken != ETH_ADDRESS) {
+      const approveBaseToken = async (required: bigint) => {
         await this.metricRecorder.stepExecution({
           stepName: STEPS.base_token_approval,
           // both spenders can need an approval transaction, each with its own 3 minute wait
@@ -136,14 +145,13 @@ export class DepositFlow extends DepositBaseFlow {
             const { l1AssetRouter, l1NativeTokenVault } = await sdk.contracts.addresses();
             const erc20Contract = getErc20Contract(this.baseToken, this.client.l1, this.wallet);
             // The vault pulls tokens on upgraded bridges. Keep the router approval as well:
-            // older bridges and the SDK's deposit planner still check its allowance.
+            // older bridges still use the router allowance.
             for (const spender of new Set([l1AssetRouter, l1NativeTokenVault])) {
               const allowance = await erc20Contract.allowance(this.wallet.address, spender);
 
-              // heuristic condition to determine if we should perform the infinite approval
-              if (allowance < parseEther("100000")) {
+              if (allowance < required) {
                 this.logger.info(`Approving base token ${this.baseToken} for infinite amount to ${spender}`);
-                const approval = await erc20Contract.approve(spender, MaxInt256);
+                const approval = await erc20Contract.approve(spender, required > MaxInt256 ? MaxUint256 : MaxInt256);
                 // Deposits use the latest mined nonce, so confirm the approval first.
                 await withTimeout(approval.wait(1), 3 * MIN, `Base token approval for ${spender}`);
               } else {
@@ -155,7 +163,7 @@ export class DepositFlow extends DepositBaseFlow {
             recordL1BaseTokenBalance(baseTokenBalance);
           },
         });
-      }
+      };
 
       await this.metricRecorder.stepExecution({
         stepName: STEPS.balance,
@@ -171,13 +179,21 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.estimation,
         stepTimeoutMs: 30 * SEC,
         fn: async ({ recordStepGas, recordStepGasCost, recordStepGasPrice }) => {
+          const fees = this.feeOverride ?? {
+            maxPriorityFeePerGas: this.getMinPriorityFeePerGas(
+              (await this.client.l1.getFeeData()).maxPriorityFeePerGas
+            ),
+          };
           const params = {
             to: this.wallet.address,
             token: this.baseToken,
-            amount: 1n, // just 1 wei
+            amount: this.amount,
             refundRecipient: this.wallet.address,
+            l1TxOverrides: { nonce: "latest", ...fees },
           } as DepositParams;
           const depositQuote = await sdk.deposits.quote(params);
+          // Keep the fee used to price the bridge mint value when create() rebuilds the quote.
+          params.l1TxOverrides!.maxFeePerGas = depositQuote.fees.l1!.maxFeePerGas;
           recordStepGas(depositQuote.fees.l1!.gasLimit);
           recordStepGasPrice(depositQuote.fees.l1!.maxFeePerGas);
           recordStepGasCost(depositQuote.fees.l1!.maxTotal);
@@ -185,6 +201,10 @@ export class DepositFlow extends DepositBaseFlow {
           return { params, quote: depositQuote };
         },
       });
+
+      if (this.baseToken !== ETH_ADDRESS) {
+        await approveBaseToken(unwrap(deposit.quote.fees.mintValue, "deposit mint value"));
+      }
       // record l2 estimates using the manual record function
       this.metricRecorder.manualRecordStepGas(STEPS.l2_estimation, unwrap(deposit.quote.fees.l2!.gasLimit));
       this.metricRecorder.manualRecordStepGasCost(STEPS.l2_estimation, unwrap(deposit.quote.fees.l2!.total));
@@ -196,26 +216,45 @@ export class DepositFlow extends DepositBaseFlow {
         return Status.SKIP;
       }
 
-      // send L1 deposit transaction
-      const { l1Tx, depositHandle } = await this.metricRecorder.stepExecution({
+      creating = true;
+      run.handle = await this.metricRecorder.stepExecution({
+        stepName: STEPS.send,
+        stepTimeoutMs: 3 * MIN,
+        fn: () => sdk.deposits.create(deposit.params),
+      });
+      return this.confirmDeposit(sdk, run.handle);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
+      this.sdkManager.reset();
+      this.metricRecorder.recordFlowFailure();
+      if (isUnderpricedError(error)) {
+        this.feeOverride = await this.computeBumpedFees(error);
+      } else {
+        this.feeOverride = null;
+        this.logger.error("deposit tx error: " + error?.message, error?.stack);
+        if (creating) {
+          const context = error?.envelope?.context;
+          if (!context?.step?.startsWith("bridgehub:") || !context.txHash) return "submission-unknown";
+          run.handle = context.txHash;
+        }
+      }
+      return Status.FAIL;
+    }
+  }
+
+  private async confirmDeposit(sdk: EthersSdk, depositHandle: DepositWaitable): Promise<Status> {
+    try {
+      const l1Tx = await this.metricRecorder.stepExecution({
         stepName: STEPS.l1_execution,
         stepTimeoutMs: 3 * MIN,
         fn: async ({ recordStepGas, recordStepGasPrice, recordStepGasCost }) => {
-          const depositHandle = await sdk.deposits.create({
-            ...deposit.params,
-            l1TxOverrides: {
-              nonce: "latest",
-              ...(this.feeOverride || {
-                maxPriorityFeePerGas: this.getMinPriorityFeePerGas(deposit.quote.fees.l1?.maxPriorityFeePerGas),
-              }),
-            },
-          } as DepositParams);
           const txReceipt = await sdk.deposits.wait(depositHandle, { for: "l1" });
+          if (txReceipt?.status === 0) throw new Error(`Deposit reverted on L1: ${txReceipt.hash}`);
           recordStepGas(unwrap(txReceipt?.gasUsed));
           recordStepGasPrice(unwrap(txReceipt?.gasPrice));
           recordStepGasCost(unwrap(txReceipt?.gasUsed) * unwrap(txReceipt?.gasPrice));
 
-          return { l1Tx: txReceipt, depositHandle };
+          return txReceipt;
         },
       }); // included in a block on L1
 
@@ -229,6 +268,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepTimeoutMs: PRIORITY_OP_TIMEOUT,
         fn: async ({ recordStepGasPrice, recordStepGas, recordStepGasCost }) => {
           const receipt = unwrap(await sdk.deposits.wait(depositHandle, { for: "l2" }));
+          if (receipt.status === 0) throw new Error(`Deposit reverted on L2: ${receipt.hash}`);
           recordStepGasPrice(unwrap(receipt.gasPrice));
           recordStepGas(unwrap(receipt.gasUsed));
           recordStepGasCost(unwrap(receipt.gasUsed) * unwrap(receipt.gasPrice));
@@ -239,15 +279,9 @@ export class DepositFlow extends DepositBaseFlow {
       this.metricRecorder.recordFlowSuccess();
       this.feeOverride = null;
       return Status.OK;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (error: any) {
+    } catch (error) {
       this.sdkManager.reset();
-      if (isUnderpricedError(error)) {
-        this.feeOverride = await this.computeBumpedFees(error);
-      } else {
-        this.feeOverride = null;
-        this.logger.error("deposit tx error: " + error?.message, error?.stack);
-      }
+      this.logger.error("Deposit confirmation failed", error);
       this.metricRecorder.recordFlowFailure();
       return Status.FAIL;
     }
@@ -272,9 +306,14 @@ export class DepositFlow extends DepositBaseFlow {
 
     while (true) {
       const nextExecutionWait = timeoutPromise(this.intervalMs);
+      const run: DepositRun = {};
       let attempt: number = 1;
       while (attempt <= DEPOSIT_RETRY_LIMIT) {
-        const result = await this.executeWatchdogDeposit();
+        const result = await this.executeWatchdogDeposit(run);
+        if (result === "submission-unknown") {
+          this.logger.warn("Deposit submission outcome unknown, ending this scheduled run");
+          break;
+        }
         switch (result) {
           case Status.OK:
             this.logger.info(`attempt ${attempt} succeeded`);

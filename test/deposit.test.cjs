@@ -46,11 +46,12 @@ function setup(t, { allowances = {}, baseToken = token, approvalError, sdkFactor
       },
     },
     deposits: {
-      async quote() {
+      async quote(params) {
         events.push("quote");
         // Exercise approval preparation and stop at the gas-price guard without sending a deposit.
         return {
           fees: {
+            mintValue: params.amount + 7n,
             l1: {
               gasLimit: 1n,
               maxFeePerGas: depositBase.DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI + 1n,
@@ -63,7 +64,10 @@ function setup(t, { allowances = {}, baseToken = token, approvalError, sdkFactor
     },
   };
   let refreshes = 0;
-  const client = { l1: { getBalance: async () => 1n }, refresh: () => refreshes++ };
+  const client = {
+    l1: { getBalance: async () => 1n, getFeeData: async () => ({ maxPriorityFeePerGas: 1n }) },
+    refresh: () => refreshes++,
+  };
   const sdkManager = createSdkManager(() => client, sdkFactory ?? (() => sdk));
   const flow = new DepositFlow({ address: wallet }, client, sdkManager, 1);
   flow.baseToken = baseToken;
@@ -86,19 +90,20 @@ test("approves the vault even when the router already has an unlimited allowance
   assert.equal(await flow.executeWatchdogDeposit(), Status.SKIP);
   assert.equal(balances.get(vault), MaxInt256);
   assert.deepEqual(events, [
+    "quote",
     "addresses",
     `allowance:${router}`,
     `allowance:${vault}`,
     `approve:${vault}`,
     `mined:${vault}`,
-    "quote",
   ]);
 });
 
-test("confirms both approvals sequentially for a new wallet before quoting", async (t) => {
+test("confirms both approvals sequentially for a new wallet", async (t) => {
   const { flow, events } = setup(t);
   assert.equal(await flow.executeWatchdogDeposit(), Status.SKIP);
   assert.deepEqual(events, [
+    "quote",
     "addresses",
     `allowance:${router}`,
     `approve:${router}`,
@@ -106,23 +111,22 @@ test("confirms both approvals sequentially for a new wallet before quoting", asy
     `allowance:${vault}`,
     `approve:${vault}`,
     `mined:${vault}`,
-    "quote",
   ]);
 });
 
 test("does not send approvals when both spenders already have sufficient allowance", async (t) => {
   const { flow, events } = setup(t, { allowances: { [router]: MaxInt256, [vault]: MaxInt256 } });
   assert.equal(await flow.executeWatchdogDeposit(), Status.SKIP);
-  assert.deepEqual(events, ["addresses", `allowance:${router}`, `allowance:${vault}`, "quote"]);
+  assert.deepEqual(events, ["quote", "addresses", `allowance:${router}`, `allowance:${vault}`]);
 });
 
-test("does not quote or submit a deposit after an approval fails to confirm", async (t) => {
+test("stops before submission after an approval fails to confirm", async (t) => {
   const { flow, events } = setup(t, {
     allowances: { [router]: MaxInt256 },
     approvalError: new Error("approval reverted"),
   });
   assert.equal(await flow.executeWatchdogDeposit(), Status.FAIL);
-  assert.equal(events.includes("quote"), false);
+  assert.equal(events.at(-1), `mined:${vault}`);
 });
 
 test("ETH-base deposits do not resolve or approve ERC-20 spenders", async (t) => {
@@ -208,4 +212,42 @@ test("preserves fee-bump recovery using a fresh SDK after an underpriced deposit
   assert.equal(healthy.createParams[0].l1TxOverrides.maxFeePerGas, 1n);
   assert.equal(flow.feeOverride, null);
   assert.equal(refreshes(), 1);
+});
+
+test("validates the amount when constructing the flow and includes fees in the vault allowance", async (t) => {
+  const original = process.env.FLOW_DEPOSIT_AMOUNT_WEI;
+  try {
+    process.env.FLOW_DEPOSIT_AMOUNT_WEI = "1e18";
+    assert.throws(() => new DepositFlow({}, {}, {}, 1), /FLOW_DEPOSIT_AMOUNT_WEI/);
+    const amount = 10n ** 23n;
+    process.env.FLOW_DEPOSIT_AMOUNT_WEI = amount.toString();
+    const { flow, balances } = setup(t, { allowances: { [router]: amount + 7n, [vault]: amount } });
+    assert.equal(await flow.executeWatchdogDeposit(), Status.SKIP);
+    assert.equal(balances.get(router), amount + 7n);
+    assert.equal(balances.get(vault), MaxInt256);
+  } finally {
+    if (original === undefined) delete process.env.FLOW_DEPOSIT_AMOUNT_WEI;
+    else process.env.FLOW_DEPOSIT_AMOUNT_WEI = original;
+  }
+});
+
+test("retries L2 confirmation with the same SDK handle", async (t) => {
+  const sdk = fakeDepositSdk();
+  const wait = t.mock.method(sdk.deposits, "wait");
+  wait.mock.mockImplementationOnce(async () => {
+    throw new Error("L2 timeout");
+  }, 1);
+  const { flow } = setup(t, { baseToken: ETH_ADDRESS, sdkFactory: () => sdk });
+  const run = {};
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.FAIL);
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.OK);
+  assert.equal(sdk.createParams.length, 1);
+  assert.ok(wait.mock.calls.every((call) => call.arguments[0] === run.handle));
+});
+
+test("a lost create response ends the scheduled run", async (t) => {
+  const sdk = fakeDepositSdk({ createError: new Error("connection reset") });
+  const { flow } = setup(t, { baseToken: ETH_ADDRESS, sdkFactory: () => sdk });
+  assert.equal(await flow.executeWatchdogDeposit({}), "submission-unknown");
+  assert.equal(sdk.createParams.length, 1);
 });
