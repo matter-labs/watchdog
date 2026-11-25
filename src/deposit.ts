@@ -22,8 +22,8 @@ import type { DepositParams, DepositWaitable, ZKsyncError } from "@matterlabs/zk
 import type { EthersClient, EthersSdk } from "@matterlabs/zksync-js/ethers";
 import type { JsonRpcProvider } from "ethers";
 
-type DepositRun = { handle?: DepositWaitable };
 type Fee = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+type DepositRun = { handle?: DepositWaitable; feeOverride?: Fee };
 
 const FLOW_NAME = "deposit";
 const DEFAULT_MIN_PRIORITY_FEE_GWEI = "0.001";
@@ -44,7 +44,6 @@ export class DepositFlow extends DepositBaseFlow {
   private baseToken!: string;
   private readonly amount: bigint;
   private readonly feeBumpPercent = +(process.env[FEE_BUMP_PERCENT_ENV] ?? DEFAULT_FEE_BUMP_PERCENT);
-  private feeOverride: Fee | null = null;
 
   constructor(
     wallet: WatchdogSigner,
@@ -69,7 +68,7 @@ export class DepositFlow extends DepositBaseFlow {
     return depositPriorityFee;
   }
 
-  private async computeBumpedFees(error: ZKsyncError): Promise<Fee | null> {
+  private async computeBumpedFees(error: ZKsyncError): Promise<Fee | undefined> {
     const nonce = error.envelope.context?.nonce as number | undefined;
     let mempoolMaxFee: bigint | undefined;
     let mempoolPriorityFee: bigint | undefined;
@@ -125,7 +124,7 @@ export class DepositFlow extends DepositBaseFlow {
       return { maxFeePerGas: newMaxFee, maxPriorityFeePerGas: newPriorityFee };
     } else {
       this.logger.warn("Deposit tx underpriced but could not determine fees to bump, will retry");
-      return null;
+      return undefined;
     }
   }
 
@@ -179,7 +178,7 @@ export class DepositFlow extends DepositBaseFlow {
         stepName: STEPS.estimation,
         stepTimeoutMs: 30 * SEC,
         fn: async ({ recordStepGas, recordStepGasCost, recordStepGasPrice }) => {
-          const fees = this.feeOverride ?? {
+          const fees = run.feeOverride ?? {
             maxPriorityFeePerGas: this.getMinPriorityFeePerGas(
               (await this.client.l1.getFeeData()).maxPriorityFeePerGas
             ),
@@ -228,9 +227,9 @@ export class DepositFlow extends DepositBaseFlow {
       this.sdkManager.reset();
       this.metricRecorder.recordFlowFailure();
       if (isUnderpricedError(error)) {
-        this.feeOverride = await this.computeBumpedFees(error);
+        run.feeOverride = await this.computeBumpedFees(error);
       } else {
-        this.feeOverride = null;
+        run.feeOverride = undefined;
         this.logger.error("deposit tx error: " + error?.message, error?.stack);
         if (creating) {
           const context = error?.envelope?.context;
@@ -277,7 +276,6 @@ export class DepositFlow extends DepositBaseFlow {
       });
       this.logger.info(`Tx ${txHashes} mined on L2`);
       this.metricRecorder.recordFlowSuccess();
-      this.feeOverride = null;
       return Status.OK;
     } catch (error) {
       this.sdkManager.reset();

@@ -143,13 +143,13 @@ function fakeDepositSdk({ quoteError, createError, onQuote } = {}) {
     calls,
     createParams,
     deposits: {
-      async quote() {
+      async quote(params) {
         calls.push("quote");
         if (quoteError) throw quoteError;
         onQuote?.();
         return {
           fees: {
-            l1: { gasLimit: 1n, maxFeePerGas: 1n, maxTotal: 1n },
+            l1: { gasLimit: 1n, maxFeePerGas: params.l1TxOverrides?.maxFeePerGas ?? 1n, maxTotal: 1n },
             l2: { gasLimit: 1n, total: 1n },
           },
         };
@@ -201,17 +201,38 @@ test("preserves fee-bump recovery using a fresh SDK after an underpriced deposit
   });
   const failed = fakeDepositSdk({ createError: error });
   const healthy = fakeDepositSdk();
+  t.mock.method(healthy.deposits, "quote").mock.mockImplementationOnce(async () => {
+    healthy.calls.push("quote");
+    return { fees: { l1: { maxFeePerGas: 9n, maxPriorityFeePerGas: 3n } } };
+  });
   const sdks = [failed, healthy];
   const { flow, refreshes } = setup(t, { baseToken: ETH_ADDRESS, sdkFactory: () => sdks.shift() });
 
-  assert.equal(await flow.executeWatchdogDeposit(), Status.FAIL);
+  const run = {};
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.FAIL);
   assert.deepEqual(failed.calls, ["quote", "create"]);
   assert.deepEqual(healthy.calls, ["quote"]);
 
-  assert.equal(await flow.executeWatchdogDeposit(), Status.OK);
-  assert.equal(healthy.createParams[0].l1TxOverrides.maxFeePerGas, 1n);
-  assert.equal(flow.feeOverride, null);
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.OK);
+  assert.equal(healthy.createParams[0].l1TxOverrides.maxFeePerGas, 9n);
   assert.equal(refreshes(), 1);
+});
+
+test("a scheduled run uses market fees after an earlier retry exceeded the cap", async (t) => {
+  const sdk = fakeDepositSdk();
+  const { flow } = setup(t, { baseToken: ETH_ADDRESS, sdkFactory: () => sdk });
+  t.mock.method(sdk.deposits, "create").mock.mockImplementationOnce(async () => {
+    throw Object.assign(new Error("underpriced"), { envelope: { cause: { code: "REPLACEMENT_UNDERPRICED" } } });
+  });
+  t.mock.method(flow, "computeBumpedFees", async () => ({
+    maxFeePerGas: depositBase.DEPOSIT_L1_GAS_PRICE_LIMIT_GWEI + 1n,
+    maxPriorityFeePerGas: 1n,
+  }));
+  const run = {};
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.FAIL);
+  assert.equal(await flow.executeWatchdogDeposit(run), Status.SKIP);
+  assert.equal(await flow.executeWatchdogDeposit({}), Status.OK);
+  assert.equal(sdk.createParams[0].l1TxOverrides.maxFeePerGas, 1n);
 });
 
 test("validates the amount when constructing the flow and includes fees in the vault allowance", async (t) => {
