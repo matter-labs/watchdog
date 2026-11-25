@@ -12,8 +12,8 @@ RUN yarn build && yarn install --production --frozen-lockfile --prefer-offline
 
 FROM node:24.22.1-alpine@sha256:6a1c190e17215d844926b0677f4bf87273ff7d5e54db06d3b5b5863ab0b09a3d
 
-# Apply OpenSSL security updates independently of the pinned Node image.
-RUN apk upgrade --no-cache libcrypto3 libssl3
+# Apply security patches to the runtime libraries in the pinned Node image.
+RUN apk upgrade --no-cache libcrypto3 libssl3 musl musl-utils zlib
 
 # npm is unused at runtime (the service runs via yarn/node); its bundled
 # node_modules carry scanner-flagged CVEs, so strip it from the final image.
