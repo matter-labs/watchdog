@@ -76,3 +76,26 @@ test("a successful attempt keeps the current SDK", async () => {
   assert.equal(await flow.executeWatchdogWithdrawal(), StatusNoSkip.OK);
   assert.deepEqual(manager.resets, []);
 });
+
+test("a failed last-withdrawal lookup at startup does not stop withdrawals", async () => {
+  const sdk = fakeSdk("current");
+  const stop = new Error("stop after the first withdrawal attempt");
+  const provider = { async getBlock() { return { number: 1, timestamp: 1000 }; } };
+  let attempts = 0;
+  const lock = {
+    withLock(fn) {
+      attempts++;
+      if (attempts > 1) throw stop;
+      return fn();
+    },
+  };
+  const flow = new WithdrawalFlow({ address: wallet, provider }, lock, 1, fakeSdkManager([sdk]), new WithdrawalReceiptStore());
+  flow.logger = { info() {}, warn() {}, error() {} };
+  flow.metricRecorder = setup(fakeSdkManager([sdk])).metricRecorder;
+  flow.getLastExecution = async () => {
+    throw new Error("query exceeds max block range 10000");
+  };
+
+  await assert.rejects(flow.run(), stop);
+  assert.deepEqual(sdk.calls, ["quote", "create", "wait"]);
+});

@@ -10,7 +10,7 @@ import { WITHDRAWAL_RETRY_INTERVAL, WITHDRAWAL_RETRY_LIMIT, WithdrawalBaseFlow, 
 import type { Mutex } from "./lock";
 import type { SdkManager } from "./sdkManager";
 import type { WatchdogSigner } from "./wallet";
-import type { WithdrawalReceiptStore } from "./withdrawalBase";
+import type { ExecutionResult, WithdrawalReceiptStore } from "./withdrawalBase";
 import type { WithdrawParams } from "@matterlabs/zksync-js/core";
 
 const FLOW_NAME = "withdrawal";
@@ -94,14 +94,15 @@ export class WithdrawalFlow extends WithdrawalBaseFlow {
   }
 
   protected async run(): Promise<void> {
-    const lastExecution = await this.getLastExecution("latest", this.wallet.address);
+    // Only decides how long to wait before the first withdrawal; a failed lookup must not stop withdrawals.
+    let lastExecution: ExecutionResult = null;
+    try {
+      lastExecution = await this.getLastExecution("latest", this.wallet.address);
+    } catch (e) {
+      this.logger.warn(`Could not look up the last withdrawal, starting without waiting: ${unwrap(e)}`);
+    }
     const currentBlockchainTimestamp = await this.getCurrentChainTimestamp();
     const timeSinceLastWithdrawalSec = currentBlockchainTimestamp - (lastExecution?.timestampL2 ?? 0);
-    if (lastExecution != null) {
-      this.metricRecorder.recordPreviousExecutionStatus(
-        lastExecution.l2Receipt.status === 1 ? StatusNoSkip.OK : StatusNoSkip.FAIL
-      );
-    }
     if (timeSinceLastWithdrawalSec < this.intervalMs / SEC) {
       const waitTime = this.intervalMs - timeSinceLastWithdrawalSec * SEC;
       this.logger.info(`Waiting ${(waitTime / 1000).toFixed(0)} seconds before starting withdrawal flow`);

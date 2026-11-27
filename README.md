@@ -134,6 +134,7 @@ Options:
 - `FLOW_WITHDRAWAL_INTERVAL` -- interval in ms
 - `FLOW_WITHDRAWAL_RETRY_LIMIT` -- number of retries (defaults to 10)
 - `FLOW_WITHDRAWAL_RETRY_INTERVAL` -- interval between retries in ms (defaults to 30sec)
+- `MAX_LOGS_BLOCKS_L2` -- how many L2 blocks to search for the wallet's last withdrawal (`BridgeBurn` on the native token vault), used after a restart and by the finalize flow; defaults to 1000, capped at 10000, `0` turns it off
 
 ### Withdrawal Finalize
 
